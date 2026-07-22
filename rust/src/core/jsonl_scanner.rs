@@ -990,6 +990,33 @@ mod tests {
     }
 
     #[test]
+    fn cumulative_token_counter_rollover_does_not_overflow() {
+        let previous = CodexTotals {
+            input: i32::MAX,
+            cached: i32::MAX,
+            output: i32::MAX,
+        };
+        let rolled_over = serde_json::json!({
+            "input_tokens": i32::MIN,
+            "cached_input_tokens": i32::MIN,
+            "output_tokens": i32::MIN,
+        });
+        let mut parser = CodexParserState::new(None, Some(previous.clone()));
+        assert_eq!(parser.total_usage_delta(&rolled_over), (0, 0, 0));
+
+        let mut fast_parser = CodexParserState::new(None, Some(previous));
+        assert_eq!(
+            fast_parser.fast_total_usage_delta(CodexFastTotals {
+                input_tokens: i32::MIN,
+                cached_input_tokens: Some(i32::MIN),
+                cache_read_input_tokens: None,
+                output_tokens: i32::MIN,
+            }),
+            (0, 0, 0)
+        );
+    }
+
+    #[test]
     fn test_fast_codex_parser_reads_legacy_event_msg_shape() {
         let range = CostUsageDayRange::new(
             NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),

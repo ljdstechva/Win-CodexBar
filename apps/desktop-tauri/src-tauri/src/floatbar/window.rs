@@ -101,7 +101,10 @@ fn fallback_physical_position(
     let window_w = window_size.width as f64 / scale_factor;
     let window_h = window_size.height as f64 / scale_factor;
     let (x, y) = default_logical_origin(mon_x, mon_y, mon_w, mon_h, window_w, window_h, style);
-    PhysicalPosition::new((x * scale_factor).round() as i32, (y * scale_factor).round() as i32)
+    PhysicalPosition::new(
+        (x * scale_factor).round() as i32,
+        (y * scale_factor).round() as i32,
+    )
 }
 
 /// True when the window rectangle intersects any connected display's full
@@ -221,6 +224,58 @@ pub fn opacity_to_alpha(opacity: u8) -> u8 {
     ((clamped as u32) * 255 / 100) as u8
 }
 
+fn point_inside_bounds(
+    point_x: i32,
+    point_y: i32,
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+) -> bool {
+    let point_x = i64::from(point_x);
+    let point_y = i64::from(point_y);
+    let left = i64::from(left);
+    let top = i64::from(top);
+    let right = left + i64::from(width);
+    let bottom = top + i64::from(height);
+
+    width > 0
+        && height > 0
+        && point_x >= left
+        && point_x < right
+        && point_y >= top
+        && point_y < bottom
+}
+
+/// Report whether the global cursor is inside the floatbar's physical window
+/// bounds. This remains reliable while `WS_EX_TRANSPARENT` is enabled, when
+/// the webview intentionally receives no pointer events.
+pub fn cursor_inside(window: &tauri::WebviewWindow) -> Result<bool, String> {
+    let _ = window;
+    #[cfg(windows)]
+    {
+        let mut point = Win32Point { x: 0, y: 0 };
+        let succeeded = unsafe { GetCursorPos(&mut point) };
+        if succeeded == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        Ok(point_inside_bounds(
+            point.x,
+            point.y,
+            position.x,
+            position.y,
+            size.width,
+            size.height,
+        ))
+    }
+
+    #[cfg(not(windows))]
+    Ok(false)
+}
+
 /// Open the floating-bar window, or focus + reapply attributes if already
 /// open. Position is restored from the geometry store keyed by
 /// `floatbar`; on first launch the window is centered horizontally near
@@ -336,10 +391,11 @@ pub fn remember_geometry<R: tauri::Runtime, M: WindowGeometry<R>>(window: &M) {
     };
     // Never re-poison the store with a position that is off every display
     // (failed recovery, transient shell state, etc.).
-    if let Ok(monitors) = window.available_monitors() {
-        if !monitors.is_empty() && !intersects_any_monitor(pos, size, &monitors) {
-            return;
-        }
+    if let Ok(monitors) = window.available_monitors()
+        && !monitors.is_empty()
+        && !intersects_any_monitor(pos, size, &monitors)
+    {
+        return;
     }
     let scale = window.scale_factor().unwrap_or(1.0);
     geometry_store::save_entry(
@@ -437,13 +493,73 @@ pub fn resize(
     height: f64,
     click_through: bool,
 ) -> Result<(), String> {
+    // Resolve the monitor before growing the window. A narrow vertical bar can
+    // legitimately sit at the right edge; if it becomes a wide horizontal bar,
+    // `current_monitor()` is less reliable after most of the new bounds extend
+    // off-screen.
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
     window
         .set_size(LogicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
+
+    // Keep content-driven growth inside the monitor work area. Resizing used
+    // to preserve the old top-left position unconditionally, so switching a
+    // right-aligned vertical bar to horizontal could leave every pill except
+    // the first beyond the screen edge even though the webview measured the
+    // full intrinsic width correctly.
+    if let (Some(monitor), Ok(position)) = (monitor, window.outer_position()) {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let requested_size = LogicalSize::new(width, height).to_physical::<u32>(scale);
+        let work_area = monitor.work_area();
+        let (x, y) = clamp_resized_position(
+            position.x,
+            position.y,
+            requested_size.width,
+            requested_size.height,
+            work_area.position.x,
+            work_area.position.y,
+            work_area.size.width,
+            work_area.size.height,
+        );
+        if x != position.x || y != position.y {
+            window
+                .set_position(tauri::PhysicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+        }
+    }
     apply_no_activate(window);
     apply_click_through(window, click_through);
     apply_always_on_top(window);
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn clamp_resized_position(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    work_x: i32,
+    work_y: i32,
+    work_width: u32,
+    work_height: u32,
+) -> (i32, i32) {
+    crate::window_positioner::clamp_position_to_work_area(
+        x,
+        y,
+        &crate::window_positioner::Rect {
+            x: work_x,
+            y: work_y,
+            width: work_width,
+            height: work_height,
+        },
+        &crate::window_positioner::PanelSize { width, height },
+        1.0,
+    )
 }
 
 /// Re-assert native topmost ordering without activating the window.
@@ -451,7 +567,9 @@ pub fn resize(
 /// Tauri's `always_on_top(true)` sets the initial intent, but on Windows
 /// resize/style changes and competing topmost windows can still disturb z-order.
 /// This Win32 pass keeps the floatbar visually above normal app windows while
-/// preserving the current foreground app's input focus.
+/// preserving the current foreground app's input focus. The feature watchdog
+/// also invokes it periodically so newer topmost windows cannot leave the bar
+/// behind indefinitely.
 pub fn apply_always_on_top(window: &tauri::WebviewWindow) {
     let _ = window;
     #[cfg(windows)]
@@ -468,7 +586,15 @@ pub fn apply_always_on_top(window: &tauri::WebviewWindow) {
             const SWP_NOSIZE: u32 = 0x0001;
             const SWP_NOMOVE: u32 = 0x0002;
             const SWP_NOACTIVATE: u32 = 0x0010;
-            let flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE;
+            const SWP_NOOWNERZORDER: u32 = 0x0200;
+            const SWP_NOSENDCHANGING: u32 = 0x0400;
+            const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
+            let flags = SWP_NOSIZE
+                | SWP_NOMOVE
+                | SWP_NOACTIVATE
+                | SWP_NOOWNERZORDER
+                | SWP_NOSENDCHANGING
+                | SWP_ASYNCWINDOWPOS;
             if SetWindowPos(h.hwnd.get(), HWND_TOPMOST, 0, 0, 0, 0, flags) == 0 {
                 tracing::warn!(
                     error = %std::io::Error::last_os_error(),
@@ -564,6 +690,13 @@ pub fn apply_click_through(window: &tauri::WebviewWindow, click_through: bool) {
 const GWL_EXSTYLE: i32 = -20;
 
 #[cfg(windows)]
+#[repr(C)]
+struct Win32Point {
+    x: i32,
+    y: i32,
+}
+
+#[cfg(windows)]
 unsafe fn set_extended_style(hwnd: isize, ex_style: isize) {
     unsafe {
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
@@ -580,6 +713,7 @@ unsafe fn set_extended_style(hwnd: isize, ex_style: isize) {
 #[cfg(windows)]
 #[link(name = "user32")]
 unsafe extern "system" {
+    fn GetCursorPos(point: *mut Win32Point) -> i32;
     fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, new: isize) -> isize;
     fn SetLayeredWindowAttributes(hwnd: isize, color_key: u32, alpha: u8, flags: u32) -> i32;
@@ -759,6 +893,34 @@ mod tests {
     }
 
     #[test]
+    fn cursor_bounds_include_top_left_and_exclude_bottom_right() {
+        assert!(point_inside_bounds(100, 200, 100, 200, 40, 20));
+        assert!(point_inside_bounds(139, 219, 100, 200, 40, 20));
+        assert!(!point_inside_bounds(140, 219, 100, 200, 40, 20));
+        assert!(!point_inside_bounds(139, 220, 100, 200, 40, 20));
+    }
+
+    #[test]
+    fn cursor_bounds_support_negative_desktop_coordinates() {
+        assert!(point_inside_bounds(-25, -10, -50, -20, 50, 40));
+        assert!(!point_inside_bounds(0, -10, -50, -20, 50, 40));
+    }
+
+    #[test]
+    fn cursor_bounds_reject_empty_windows() {
+        assert!(!point_inside_bounds(10, 10, 10, 10, 0, 20));
+        assert!(!point_inside_bounds(10, 10, 10, 10, 20, 0));
+    }
+
+    #[test]
+    fn horizontal_growth_reclamps_a_right_edge_floatbar() {
+        assert_eq!(
+            clamp_resized_position(3500, 200, 900, 60, 1920, 0, 1920, 1040),
+            (2932, 200)
+        );
+    }
+
+    #[test]
     fn default_logical_origin_matches_first_open_policy() {
         assert_eq!(
             default_logical_origin(0.0, 0.0, 1_920.0, 1_080.0, 211.0, 40.0, "floating"),
@@ -767,6 +929,14 @@ mod tests {
         assert_eq!(
             default_logical_origin(0.0, 0.0, 1_920.0, 1_080.0, 211.0, 40.0, "taskbar"),
             (854.5, 1_032.0),
+        );
+    }
+
+    #[test]
+    fn resize_keeps_an_in_bounds_floatbar_position() {
+        assert_eq!(
+            clamp_resized_position(2200, 200, 900, 60, 1920, 0, 1920, 1040),
+            (2200, 200)
         );
     }
 }

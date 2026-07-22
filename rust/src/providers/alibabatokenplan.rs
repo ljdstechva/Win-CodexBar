@@ -39,6 +39,7 @@ struct TokenPlanSnapshot {
     total_quota: Option<f64>,
     remaining_quota: Option<f64>,
     resets_at: Option<DateTime<Utc>>,
+    subscription_ends_at: Option<DateTime<Utc>>,
 }
 
 impl AlibabaTokenPlanProvider {
@@ -214,6 +215,10 @@ impl AlibabaTokenPlanProvider {
             .as_ref()
             .and_then(find_reset_date)
             .or_else(|| find_reset_date(&expanded));
+        let subscription_ends_at = instance
+            .as_ref()
+            .and_then(find_subscription_end_date)
+            .or_else(|| find_subscription_end_date(&expanded));
 
         if plan_name.is_none() && total.is_none() && used.is_none() && remaining.is_none() {
             return Err(ProviderError::Parse(format!(
@@ -228,6 +233,7 @@ impl AlibabaTokenPlanProvider {
             total_quota: total,
             remaining_quota: remaining,
             resets_at,
+            subscription_ends_at,
         })
     }
 
@@ -301,6 +307,9 @@ impl AlibabaTokenPlanProvider {
         let mut usage = UsageSnapshot::new(primary);
         if let Some(plan) = snapshot.plan_name.filter(|plan| !plan.trim().is_empty()) {
             usage = usage.with_login_method(plan);
+        }
+        if let Some(ends_at) = snapshot.subscription_ends_at {
+            usage = usage.with_subscription_ends_at(ends_at);
         }
         Ok(usage)
     }
@@ -487,6 +496,15 @@ const RESET_DATE_KEYS: &[&str] = &[
     "nearestExpireDate",
     "NearestExpireDate",
 ];
+const SUBSCRIPTION_END_DATE_KEYS: &[&str] = &[
+    "expireTime",
+    "expirationTime",
+    "endTime",
+    "validEndTime",
+    "instanceEndTime",
+    "nearestExpireDate",
+    "NearestExpireDate",
+];
 
 fn find_token_plan_instance(value: &Value) -> Option<Value> {
     find_first_object(
@@ -544,6 +562,11 @@ fn find_quota_info(value: &Value) -> Option<Value> {
 
 fn find_reset_date(value: &Value) -> Option<DateTime<Utc>> {
     first_date(value, RESET_DATE_KEYS).or_else(|| find_first_date(value, RESET_DATE_KEYS))
+}
+
+fn find_subscription_end_date(value: &Value) -> Option<DateTime<Utc>> {
+    first_date(value, SUBSCRIPTION_END_DATE_KEYS)
+        .or_else(|| find_first_date(value, SUBSCRIPTION_END_DATE_KEYS))
 }
 
 fn find_first_object(value: &Value, keys: &[&str]) -> Option<Value> {
@@ -909,6 +932,16 @@ mod tests {
             Some(75.0)
         );
         assert!(snapshot.resets_at.is_some());
+        assert_eq!(
+            snapshot.subscription_ends_at,
+            Utc.with_ymd_and_hms(2026, 6, 30, 0, 0, 0).single()
+        );
+
+        let usage = AlibabaTokenPlanProvider::snapshot_to_usage(snapshot).unwrap();
+        assert_eq!(
+            usage.subscription_ends_at,
+            Utc.with_ymd_and_hms(2026, 6, 30, 0, 0, 0).single()
+        );
     }
 
     #[test]

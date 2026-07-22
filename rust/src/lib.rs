@@ -22,6 +22,7 @@ pub mod status;
 pub mod tray;
 pub mod updater;
 pub mod wsl;
+pub mod x_notifications;
 
 mod codex_costs;
 mod codex_sessions;

@@ -2106,6 +2106,29 @@ body:has(.tray-panel-reveal) {
   align-items: center;
 }
 
+.provider-detail-wayfinder__field {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.provider-detail-wayfinder__field .text-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.provider-detail-wayfinder__help {
+  margin: 5px 0 8px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.provider-detail-wayfinder .provider-detail-error {
+  margin-bottom: 8px;
+}
+
 /* ── ProviderIcon (Phase 6a) ──────────────────────────────────────── */
 
 .provider-icon {
@@ -3012,6 +3035,7 @@ body:has(.tray-panel-reveal) {
    ────────────────────────────────────────────────────────────────────── */
 
 .menu-surface {
+  position: relative;
   display: flex;
   flex-direction: column;
   /* upstream MenuContent VStack(spacing: 8) */
@@ -3194,6 +3218,275 @@ body:has(.tray-panel-reveal) {
 .menu-surface__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* X watchlist lives in the tray-opened dashboard toolbar. Its panel overlays
+   the body below the toolbar so neither auto-fit nor user-sized flex layout can
+   compress the notification list or perturb provider-card measurement. */
+.tray-x-notifications__button {
+  position: relative;
+}
+
+.tray-x-notifications__button img {
+  width: 15px;
+  height: 15px;
+  filter: invert(72%);
+  opacity: 0.92;
+}
+
+.tray-x-notifications__button:hover img,
+.tray-x-notifications__button--open img {
+  filter: invert(100%);
+  opacity: 1;
+}
+
+[data-theme="light"] .tray-x-notifications__button img {
+  filter: none;
+}
+
+.tray-x-notifications__button--open {
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+}
+
+.tray-x-notifications__badge {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  padding: 0 3px;
+  color: #fff;
+  background: #e5484d;
+  border: 1.5px solid var(--menu-popover-bg);
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tray-x-notifications__panel {
+  position: absolute;
+  top: 31px;
+  left: 6px;
+  right: 6px;
+  z-index: 20;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc((100vh - 88px) / var(--tray-zoom, 1));
+  margin: 0;
+  overflow: hidden;
+  flex-direction: column;
+  color: var(--text-primary);
+  background: rgba(28, 28, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+}
+
+[data-theme="light"] .tray-x-notifications__panel {
+  background: rgba(250, 250, 252, 0.98);
+  border-color: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+.tray-x-notifications__header {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 9px;
+  flex-direction: column;
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+[data-theme="light"] .tray-x-notifications__header {
+  border-bottom-color: rgba(0, 0, 0, 0.10);
+}
+
+.tray-x-notifications__heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tray-x-notifications__heading strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.tray-x-notifications__heading span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-x-notifications__actions {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.tray-x-notifications__actions button {
+  padding: 3px 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+[data-theme="light"] .tray-x-notifications__actions button {
+  border-color: rgba(0, 0, 0, 0.14);
+}
+
+.tray-x-notifications__actions button:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+}
+
+.tray-x-notifications__actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.tray-x-notifications__list {
+  display: flex;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142, 142, 147, 0.45) transparent;
+}
+
+.tray-x-notifications__item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+[data-theme="light"] .tray-x-notifications__item {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+.tray-x-notifications__item:last-child {
+  border-bottom: 0;
+}
+
+.tray-x-notifications__item:hover,
+.tray-x-notifications__item:focus-visible {
+  background: var(--surface-elevated);
+  outline: none;
+}
+
+.tray-x-notifications__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.tray-x-notifications__meta strong {
+  overflow: hidden;
+  max-width: 110px;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.tray-x-notifications__kind {
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.tray-x-notifications__text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.tray-x-notifications__empty {
+  padding: 20px 12px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.tray-x-notifications__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+[data-theme="light"] .tray-x-notifications__status {
+  border-top-color: rgba(0, 0, 0, 0.10);
+}
+
+.tray-x-notifications__status-alerts {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--status-stale, #f59e0b);
+  text-align: right;
+}
+
+.tray-x-notifications__warning {
+  color: var(--status-stale, #f59e0b);
+  cursor: help;
 }
 
 .menu-surface__summary {
@@ -3661,15 +3954,8 @@ html:has(.menu-surface--tray) {
   margin-top: 0;
   font-size: 10px;
 }
-/* Hide pace section in tray — macOS doesn't show pace in the compact popover */
-.menu-surface--tray .menu-card__pace,
-.menu-surface--tray .menu-card__pace + .menu-card__divider,
-.menu-surface--tray .menu-card__content > .menu-card__divider:has(+ .menu-card__pace) {
-  display: none;
-}
-/* Hide large charts in tray; keep the compact local token/cost summary visible. */
-.menu-surface--tray .menu-card__charts,
-.menu-surface--tray .menu-card__local-chart {
+/* Keep Pace visible in the tray; hide only the large historical charts. */
+.menu-surface--tray .menu-card__charts {
   display: none;
 }
 .menu-surface--tray .menu-card__local-grid {
@@ -3678,29 +3964,17 @@ html:has(.menu-surface--tray) {
 .menu-surface--tray .menu-card__local-usage {
   padding-top: 2px;
 }
-.menu-surface--tray .menu-card__local-note {
-  font-size: 10px;
-  line-height: 1.25;
-}
-/* Hide cost section in tray — macOS compact popover only shows usage metrics */
-.menu-surface--tray .menu-card__cost,
-.menu-surface--tray .menu-card__content > .menu-card__divider:has(+ .menu-card__cost) {
-  display: none;
-}
-
 .menu-card__local-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px 28px;
 }
-.menu-card__local-grid > div,
-.menu-card__local-note {
+.menu-card__local-grid > div {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.menu-card__local-label,
-.menu-card__local-note {
+.menu-card__local-label {
   font-size: 11px;
   color: var(--text-secondary);
 }
@@ -3710,27 +3984,18 @@ html:has(.menu-surface--tray) {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
-.menu-card__local-chart {
+.menu-card__wayfinder-savings {
+  font-size: var(--font-footnote);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.menu-card__wayfinder-notes {
   display: flex;
-  align-items: flex-end;
-  gap: 5px;
-  height: 68px;
-  margin-top: 2px;
-}
-.menu-card__local-chart span {
-  width: 8px;
-  border-radius: 2px 2px 0 0;
-  background: #bf8337;
-}
-.menu-card__local-note strong {
-  font-size: 11px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-caption2);
+  line-height: 1.25;
   color: var(--text-secondary);
-}
-.menu-card__local-note span {
-  overflow: visible;
-  text-overflow: initial;
-  white-space: normal;
-  line-height: 1.3;
 }
 
 /* Tray footer — match macOS NSMenuItem native look (10pt, ~16px row height) */
@@ -4115,21 +4380,15 @@ html:has(.menu-surface--tray) {
   background: var(--chart-credits-fg);
 }
 
-/* ── Cost section (upstream `tokenUsage` block) ─────────────────────── */
-
-.menu-card__cost-line {
-  font-size: 11px; /* upstream: .font(.footnote) */
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.menu-card__cost-line--muted {
-  color: var(--text-secondary);
-}
-
-/* ── Pace section (Tauri-only; sits below cost in the same card) ────── */
+/* ── Pace section ──────────────────────────────────────────────────── */
 
 .menu-card__pace {
+  gap: 8px;
+}
+
+.menu-card__pace-window {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
 }
 
@@ -4688,7 +4947,6 @@ html:has(.menu-surface--tray) {
 .menu-metric__reset {
   font-size: var(--font-caption);
 }
-.menu-card__cost-line,
 .menu-card__pace-label,
 .menu-card__pace-eta,
 .menu-card__pace-ok {
@@ -4974,6 +5232,25 @@ html:has(.menu-surface--tray) {
   border: none;
   border-radius: 0;
   background: transparent;
+}
+
+.settings-inline-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-inline-field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-caption);
+}
+
+.settings-inline-field .number-input {
+  width: 100%;
+  min-width: 0;
 }
 /* ── Form controls: native-feeling macOS look ─────────────────────── */
 /* `.toggle` is now a native checkbox; styles defined earlier in this
@@ -5571,10 +5848,6 @@ html:has(.menu-surface--tray) {
     gap: 7px 20px;
   }
 
-  .menu-surface--popout .menu-card__local-chart {
-    height: 46px;
-  }
-
   .menu-surface--popout .menu-surface__footer-row {
     padding-top: 3px;
     padding-bottom: 3px;
@@ -5596,7 +5869,32 @@ html:has(.menu-surface--tray) {
   gap: 8px;
 }
 
+.agent-sessions__refresh {
+  padding: 3px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-sessions__refresh:hover {
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+}
+
+.agent-sessions__list {
+  display: grid;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .agent-sessions__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   width: 100%;
   padding: 6px 8px;
   border: 0;
@@ -5604,6 +5902,24 @@ html:has(.menu-surface--tray) {
   color: inherit;
   background: var(--surface-elevated);
   cursor: pointer;
+}
+
+.agent-sessions__provider {
+  font-weight: 600;
+}
+
+.agent-sessions__workspace {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-sessions__state {
+  color: var(--text-muted);
+  text-transform: capitalize;
 }
 
 .agent-sessions__error {

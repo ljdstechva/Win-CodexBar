@@ -103,11 +103,13 @@ function provider(id: string, displayName: string, used = 20): ProviderUsageSnap
     extraRateWindows: [],
     cost: null,
     planName: null,
+    subscriptionEndsAt: null,
     accountEmail: null,
     sourceLabel: "auto",
     updatedAt: "2026-05-24T00:00:00Z",
     error: null,
     pace: null,
+    weeklyPace: null,
     accountOrganization: null,
     trayStatusLabel: null,
     fetchDurationMs: null,
@@ -163,6 +165,7 @@ function settings(): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarShowResetInline: false,
     floatBarShowCost: false,
+    floatBarShowAccount: true,
   };
 }
 

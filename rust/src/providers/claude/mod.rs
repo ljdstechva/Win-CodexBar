@@ -335,7 +335,7 @@ impl Provider for ClaudeProvider {
     }
 
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
-        match ctx.source_mode {
+        let result = match ctx.source_mode {
             SourceMode::Auto => self.fetch_via_auto(ctx).await,
             SourceMode::OAuth => self.fetch_via_oauth(ctx).await,
             SourceMode::Web => self.fetch_via_web(ctx).await,
@@ -350,7 +350,9 @@ impl Provider for ClaudeProvider {
                 }
                 Err(error) => Err(error),
             },
-        }
+        }?;
+
+        Ok(self.enrich_with_subscription_end(result).await)
     }
 
     fn available_sources(&self) -> Vec<SourceMode> {
@@ -380,6 +382,41 @@ impl Provider for ClaudeProvider {
 }
 
 impl ClaudeProvider {
+    async fn enrich_with_subscription_end(
+        &self,
+        mut result: ProviderFetchResult,
+    ) -> ProviderFetchResult {
+        if result.usage.subscription_ends_at.is_some() || result.source_label == "web" {
+            return result;
+        }
+
+        let summary = match self.web_fetcher.fetch_subscription_with_cookies().await {
+            Ok(Some(summary)) => summary,
+            Ok(None) => return result,
+            Err(error) => {
+                tracing::debug!(
+                    error = %crate::logging::safe_error_message(error),
+                    "Claude subscription enrichment unavailable"
+                );
+                return result;
+            }
+        };
+
+        if claude_plan_labels_match(
+            result.usage.login_method.as_deref(),
+            summary.plan_name.as_deref(),
+        ) {
+            result.usage = result.usage.with_subscription_ends_at(summary.ends_at);
+        } else {
+            // Do not merge a billing boundary from a different browser account
+            // into an OAuth/CLI quota snapshot. The FloatBar will show the
+            // truthful localized unavailable state instead.
+            tracing::debug!("Claude subscription enrichment skipped because plans did not match");
+        }
+
+        result
+    }
+
     async fn fetch_via_auto(
         &self,
         ctx: &FetchContext,
@@ -603,6 +640,26 @@ impl ClaudeProvider {
 
         Ok(ProviderFetchResult::new(usage, "cli"))
     }
+}
+
+fn normalized_claude_plan_label(value: &str) -> Option<String> {
+    let compact = value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let normalized = compact.strip_prefix("claude").unwrap_or(&compact);
+    (!normalized.is_empty() && normalized != "oauth").then(|| normalized.to_string())
+}
+
+fn claude_plan_labels_match(left: Option<&str>, right: Option<&str>) -> bool {
+    let Some(left) = left.and_then(normalized_claude_plan_label) else {
+        return false;
+    };
+    let Some(right) = right.and_then(normalized_claude_plan_label) else {
+        return false;
+    };
+    left == right
 }
 
 fn record_auto_source(
@@ -975,7 +1032,10 @@ mod tests {
     #[test]
     fn passive_probe_env_disables_autoupdater_and_color() {
         let env = claude_passive_probe_env(HashMap::new());
-        assert_eq!(env.get("DISABLE_AUTOUPDATER").map(String::as_str), Some("1"));
+        assert_eq!(
+            env.get("DISABLE_AUTOUPDATER").map(String::as_str),
+            Some("1")
+        );
         assert_eq!(env.get("NO_COLOR").map(String::as_str), Some("1"));
     }
 
@@ -987,8 +1047,14 @@ mod tests {
         assert_eq!(first, second);
         assert!(uuid::Uuid::parse_str(&first).is_ok());
         let args = claude_probe_launch_args(&first);
-        assert!(args.windows(2).any(|w| w[0] == "--session-id" && w[1] == first));
-        assert!(args.windows(2).any(|w| w[0] == "--allowed-tools" && w[1].is_empty()));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--session-id" && w[1] == first)
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--allowed-tools" && w[1].is_empty())
+        );
     }
 
     #[test]
@@ -1000,6 +1066,61 @@ mod tests {
         cleanup_probe_session_jsonl(dir.path());
         assert!(!jsonl.exists());
         assert!(dir.path().join("keep.txt").exists());
+    }
+
+    #[test]
+    fn matches_only_the_same_claude_plan_for_subscription_enrichment() {
+        assert!(claude_plan_labels_match(
+            Some("Claude Max 5x"),
+            Some("claude_max_5x")
+        ));
+        assert!(!claude_plan_labels_match(
+            Some("Claude Max 5x"),
+            Some("Claude Pro")
+        ));
+        assert!(!claude_plan_labels_match(
+            Some("Claude (OAuth)"),
+            Some("Claude Max 5x")
+        ));
+        assert!(!claude_plan_labels_match(Some("Claude Max 5x"), None));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Claude OAuth credentials and a matching logged-in Claude browser account"]
+    async fn live_claude_subscription_end() {
+        let provider = ClaudeProvider::new();
+        let billing = provider
+            .web_fetcher
+            .fetch_subscription_with_cookies()
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "the authenticated Claude billing probe failed: {}",
+                    crate::logging::safe_error_message(error)
+                )
+            })
+            .expect("the authenticated Claude billing response had no future renewal/end boundary");
+        assert!(billing.ends_at > Utc::now());
+        assert!(
+            billing.plan_name.is_some(),
+            "Claude billing plan was unavailable"
+        );
+
+        let result = provider
+            .fetch_usage(&FetchContext {
+                source_mode: SourceMode::OAuth,
+                ..FetchContext::default()
+            })
+            .await
+            .expect("the normal OAuth provider path must fetch live Claude usage");
+
+        assert!(
+            result
+                .usage
+                .subscription_ends_at
+                .is_some_and(|ends_at| ends_at > Utc::now()),
+            "the authenticated Claude billing source did not expose a matching future renewal/end boundary"
+        );
     }
 
     #[test]

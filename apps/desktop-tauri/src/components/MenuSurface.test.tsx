@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => eventMocks);
 
 import { LocaleProvider } from "../i18n/LocaleProvider";
 import { buildBundle } from "../test/localeHarness";
-import { MenuSummary } from "./MenuSurface";
+import MenuSurface, { MenuSummary } from "./MenuSurface";
 
 function renderSummary(total: number) {
   return render(
@@ -52,5 +52,60 @@ describe("MenuSummary", () => {
     renderSummary(2);
 
     expect(await screen.findByText("2 providers")).toBeInTheDocument();
+  });
+});
+
+describe("MenuSurface toolbar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tauriMocks.getLocaleStrings.mockResolvedValue(
+      buildBundle({ TooltipRefresh: "Refresh" }),
+    );
+    eventMocks.listen.mockResolvedValue(() => {});
+  });
+
+  it("renders working refresh and surface action buttons", async () => {
+    const onRefresh = vi.fn();
+    const onBackToTray = vi.fn();
+
+    render(
+      <LocaleProvider>
+        <MenuSurface
+          variant="popout"
+          onRefresh={onRefresh}
+          isRefreshing={false}
+          actions={[
+            { icon: "↙", title: "Back to tray", onClick: onBackToTray },
+          ]}
+        >
+          <div>Dashboard</div>
+        </MenuSurface>
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to tray" }));
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onBackToTray).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables and animates refresh while a request is active", async () => {
+    render(
+      <LocaleProvider>
+        <MenuSurface
+          variant="tray"
+          onRefresh={vi.fn()}
+          isRefreshing
+          actions={[]}
+        >
+          <div>Dashboard</div>
+        </MenuSurface>
+      </LocaleProvider>,
+    );
+
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    expect(refresh).toBeDisabled();
+    expect(refresh.querySelector(".spin")).not.toBeNull();
   });
 });

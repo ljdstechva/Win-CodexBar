@@ -39,28 +39,40 @@ export default function AgentSessions() {
     <section className="agent-sessions" aria-label={t("AgentSessionsTitle")}>
       <div className="agent-sessions__header">
         <strong>{t("AgentSessionsTitle")}</strong>
-        <button type="button" onClick={refresh}>{t("ActionRefresh")}</button>
+        <button className="agent-sessions__refresh" type="button" onClick={refresh}>
+          {t("ActionRefresh")}
+        </button>
       </div>
       {!result && <p>{t("AgentSessionsLoading")}</p>}
       {result && sessions.length === 0 && (
         <p>{t("AgentSessionsEmpty")}</p>
       )}
-      {sessions.map((session) => (
-        <button
-          type="button"
-          className="agent-sessions__row"
-          key={`${session.host}:${session.provider}:${session.id}`}
-          onClick={() => focus(session)}
-        >
-          <span>
-            {session.provider === "codex"
-              ? t("ProviderNameCodex")
-              : t("ProviderNameClaude")}
-          </span>
-          <span>{session.workspace.projectName ?? session.host}</span>
-          <span>{session.state}</span>
-        </button>
-      ))}
+      {sessions.length > 0 && (
+        <div className="agent-sessions__list">
+          {sessions.map((session) => {
+            const workspace =
+              session.workspace.projectName ?? session.workspace.cwd ?? session.host;
+            return (
+              <button
+                type="button"
+                className="agent-sessions__row"
+                key={`${session.host}:${session.provider}:${session.id}`}
+                onClick={() => focus(session)}
+              >
+                <span className="agent-sessions__provider">
+                  {session.provider === "codex"
+                    ? t("ProviderNameCodex")
+                    : t("ProviderNameClaude")}
+                </span>
+                <span className="agent-sessions__workspace" title={workspace}>
+                  {workspace}
+                </span>
+                <span className="agent-sessions__state">{session.state}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {[...hostErrors, ...(error ? [error] : [])].map((message) => (
         <p className="agent-sessions__error" key={message}>{message}</p>
       ))}

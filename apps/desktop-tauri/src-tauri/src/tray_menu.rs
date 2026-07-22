@@ -161,10 +161,6 @@ pub(crate) fn build_tray_menu_with(
         "settings",
         text(LocaleKey::TraySettings),
     ));
-    menu.push(TrayMenuEntry::item(
-        "check_for_updates",
-        text(LocaleKey::TrayCheckForUpdates),
-    ));
     menu.push(TrayMenuEntry::item("about", text(LocaleKey::MenuAbout)));
     menu.push(TrayMenuEntry::separator());
     menu.push(TrayMenuEntry::item("quit", text(LocaleKey::MenuQuit)));
@@ -245,13 +241,6 @@ fn proof_menu_entries<'a>(
 mod tests {
     use super::*;
 
-    fn menu_contains(menu: &[TrayMenuEntry], id: &str) -> bool {
-        menu.iter().any(|entry| {
-            entry.id.as_deref() == Some(id)
-                || (!entry.children.is_empty() && menu_contains(&entry.children, id))
-        })
-    }
-
     fn sample_provider_catalog() -> Vec<ProviderCatalogEntry> {
         vec![
             ProviderCatalogEntry {
@@ -290,7 +279,6 @@ mod tests {
                 "Show Float Bar",
                 "Providers",
                 "Settings...",
-                "Check for Updates",
                 "About CodexBar",
                 "Quit",
             ]
@@ -318,12 +306,6 @@ mod tests {
 
         assert_eq!(menu_path, "tray");
         assert!(items.iter().any(|item| item == "About CodexBar"));
-    }
-
-    #[test]
-    fn check_for_updates_item_is_present() {
-        let menu = build_tray_menu(&sample_provider_catalog(), &[], &both_enabled());
-        assert!(menu_contains(&menu, "check_for_updates"));
     }
 
     #[test]

@@ -1,191 +1,160 @@
 # Win-CodexBar
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文（臺灣）](./README.zh-TW.md) | [日本語](./README.ja-JP.md) | [한국어](./README.ko-KR.md) | [Español mexicano](./README.es-MX.md)
+Win-CodexBar is a native Windows system-tray and floating-overlay app for monitoring AI-provider usage without keeping provider dashboards open. This customized Tauri + React + Rust build is based on CodexBar 0.45.2 and adds Windows-focused subscription visibility, a privacy-safe FloatBar, and reliable X watchlist notifications.
 
-Win-CodexBar is a Windows system-tray app for keeping AI coding-tool usage visible without opening a dozen dashboards. It ports the spirit of [CodexBar](https://github.com/steipete/CodexBar) to a Tauri + React desktop shell backed by shared Rust provider logic.
+![Win-CodexBar FloatBar showing provider quota and subscription countdowns](artifacts/main-v0.45.2-live-qa/floatbar-vertical-live.jpg)
 
-<table>
-  <tr>
-    <td width="36%" align="center">
-      <img src="docs/images/tray-panel.png" alt="Win-CodexBar tray panel showing provider usage cards"/>
-    </td>
-    <td width="64%" align="center">
-      <img src="docs/images/settings-providers.png" alt="Win-CodexBar Providers settings page"/>
-    </td>
-  </tr>
-</table>
+## What this build adds
 
-## Highlights
+- Genuine `ChatGPT Pro` and `Claude Max 5x` subscription countdowns when the providers expose authoritative future expiry dates.
+- A compact always-on-top FloatBar with the OpenAI mark for ChatGPT, remaining quota, reset countdowns, Claude `FA` quota, and no Pace rows.
+- Truthful unavailable values: an unavailable or informational window displays `—` instead of a fabricated percentage.
+- Correct quota severity colors independent of used/remaining display mode.
+- An X notification panel attached to the tray dashboard for `@thsottiaux`, `@OpenAI`, and `@sama`, with replies/reposts, exact status links, seven-day deduplication, retry/backoff, and visible sanitized errors.
+- Privacy filtering: FloatBar account pills show only plan type and genuine subscription countdown—never email, cost, cookies, tokens, or inferred expiry.
+- Automatic update installation disabled for this customized build so upstream releases cannot silently overwrite the verified behavior.
 
-- **56 providers** including Codex, Claude, Copilot, OpenRouter, Cursor, Gemini, DeepSeek, MiniMax, Kiro, Antigravity, Groq, Qoder, Sakana AI, CrossModel, and more.
-- **Tray-first workflow** with a compact provider grid, usage cards, refresh action, settings shortcut, and quit control.
-- **Provider settings** for source selection, credentials, cookie import, token accounts, API keys, regions, and tray-display preferences.
-- **Windows credential protection** for app-managed API keys, manual cookies, and token accounts, using user-scoped DPAPI where available.
-- **Browser cookie import** for Chrome, Edge, Brave, and Firefox, kept opt-in per provider.
-- **Installed local CLI** for scripting usage, cost, config, diagnostics, and loopback integrations.
-- **Installer + portable builds** with WebView2 runtime bootstrap, VC++ runtime bootstrap, and SHA-256 checksum files.
+## Install on Windows 11
 
-## Install
+### Recommended: installer
 
-Install with Windows Package Manager:
+1. Open the [latest release](https://github.com/ljdstechva/Win-CodexBar/releases/latest).
+2. Download the Windows x64 installer ending in `x64-setup.exe` and its matching `.sha256` file.
+3. In PowerShell, verify the download before running it:
+
+   ```powershell
+   $Installer = "C:\Path\To\CodexBar-Desktop_x64-setup.exe"
+   (Get-FileHash -Algorithm SHA256 -LiteralPath $Installer).Hash
+   Get-Content -LiteralPath "$Installer.sha256"
+   ```
+
+   The two SHA-256 values must match.
+
+4. Close any running CodexBar instance, run the installer, and launch **CodexBar** from the Start Menu.
+5. Windows SmartScreen may warn because this community build is currently unsigned. Continue only after the checksum matches the release checksum.
+
+The installer adds the WebView2 bootstrapper when Windows needs it. Existing settings are stored at `%APPDATA%\CodexBar\settings.json` and should remain unchanged during an upgrade.
+
+### Portable or same-version upgrade
+
+The release also includes a portable executable ending in `x64-portable.exe` with its own `.sha256` file. It can run without installing.
+
+If Windows already has the same CodexBar version and the installer leaves the older executable in place:
+
+1. Exit CodexBar.
+2. Back up `%LOCALAPPDATA%\Programs\CodexBar\codexbar.exe`.
+3. Verify the portable executable checksum.
+4. Replace the installed `codexbar.exe` with the verified portable executable.
+5. Relaunch CodexBar and confirm the installed and portable SHA-256 hashes match.
+
+## Copy-paste prompt for an AI agent
+
+Paste the following into Codex or another trusted local coding agent:
+
+```text
+Install the latest verified public release of Win-CodexBar from
+https://github.com/ljdstechva/Win-CodexBar on this Windows 11 x64 computer.
+
+Requirements:
+1. Use PowerShell and download only from this repository's GitHub Releases page or GitHub Releases API. Do not use mirrors.
+2. Select the latest non-draft, non-prerelease release. Download the x64 setup EXE, the x64 portable EXE, and both matching .sha256 files.
+3. Verify each file with Get-FileHash -Algorithm SHA256 before executing or copying it. Stop and report if any checksum differs.
+4. Before changing anything, record the SHA-256 of %APPDATA%\CodexBar\settings.json if it exists and create a rollback backup of the existing %LOCALAPPDATA%\Programs\CodexBar installation directory.
+5. Stop only running CodexBar processes whose executable path is inside that exact installation directory. Do not stop unrelated processes.
+6. Run the verified installer and wait for completion. If a same-version installation does not replace codexbar.exe, stop CodexBar and copy the verified portable EXE to %LOCALAPPDATA%\Programs\CodexBar\codexbar.exe instead.
+7. Confirm the installed executable's SHA-256 matches the verified portable release asset, confirm ProductVersion is the expected release version, and confirm the settings-file hash is unchanged.
+8. Launch the installed app and verify that the CodexBar process remains running and the FloatBar or tray UI appears.
+9. For Claude subscription expiry only, if Claude Desktop is locking its cookie database, close Claude Desktop briefly, relaunch/refresh CodexBar once, then restore Claude Desktop. Never print, copy, or expose cookies, tokens, API keys, or account email.
+10. Report the installed path, version, final SHA-256, settings-preservation result, rollback location, and any remaining warning. Do not change provider settings unless I explicitly ask.
+```
+
+## First run
+
+1. Click the CodexBar tray icon to open the dashboard.
+2. Open **Settings → Providers** and enable the providers you use.
+3. Configure each provider through its supported login, API key, token account, manual cookie, or browser-cookie import flow.
+4. Open **Settings → Display** to enable and configure the FloatBar.
+
+For Claude, briefly close Claude Desktop during CodexBar's first authenticated refresh if the subscription countdown says `expiry unavailable`; Claude Desktop can lock its cookie database. Reopen Claude after CodexBar has loaded the authoritative billing boundary.
+
+## Main custom surfaces
+
+- **Tray dashboard:** provider cards, capacity/reset details, subscription countdowns, refresh/settings actions, and the X notification bell.
+- **FloatBar:** native always-on-top overlay showing remaining capacity and optional privacy-safe account pills.
+- **X updates:** rolling seven-day unread ledger for the fixed watchlist, with `Check now`, exact post links, and visible failure state.
+- **Settings:** five tabs—General, Providers, Display, Advanced, and About.
+
+## Build from source
+
+### Prerequisites
+
+- Windows 11 x64
+- Rust stable with the `x86_64-pc-windows-msvc` target
+- Microsoft Visual Studio Build Tools with **Desktop development with C++**
+- Node.js 20+
+- pnpm 10.18.1 (Corepack can install the pinned package-manager version)
+
+### Clone and build the release bundles
 
 ```powershell
-winget install Finesssee.Win-CodexBar
+git clone https://github.com/ljdstechva/Win-CodexBar.git
+Set-Location Win-CodexBar
+corepack enable
+Set-Location apps\desktop-tauri
+pnpm install --frozen-lockfile
+pnpm exec tauri build
 ```
 
-Or download the latest installer/portable build from [GitHub Releases](https://github.com/Finesssee/Win-CodexBar/releases).
+Outputs:
 
-- Installer: `CodexBar-<version>-Setup.exe`
-- Portable: `CodexBar-<version>-portable.exe`
-- Checksums: each release includes `.sha256` files
+- App executable: `target\release\codexbar-desktop-tauri.exe`
+- NSIS installer: `target\release\bundle\nsis\CodexBar Desktop_<version>_x64-setup.exe`
+- MSI installer: `target\release\bundle\msi\CodexBar Desktop_<version>_x64_en-US.msi`
 
-Winget distribution is approved through [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs/tree/master/manifests/f/Finesssee/Win-CodexBar). New versions can take a little time to appear because every Winget update is pinned to a specific release URL and installer hash.
-
-## First Run
-
-1. Launch **CodexBar** from the Start Menu or portable executable.
-2. Click the tray icon to open the usage panel.
-3. Open **Settings -> Providers**.
-4. Enable the providers you use.
-5. Add the matching credential type: OAuth/device login, API key, browser cookies, local CLI login, or token account.
-
-For Claude, browser cookies/sessionKey are preferred because they match Claude's settings-page usage. OAuth and CLI stay available as fallbacks. For CLI-based providers such as Codex and Gemini, sign in with the provider CLI first.
-
-## Latest Release
-
-**v0.33.2** fixes tray-panel dismissal so the popover closes on focus loss or Escape, without immediately reopening from the same tray click.
-
-See the full history in [CHANGELOG.md](CHANGELOG.md).
-
-## Supported Providers
-
-<details>
-<summary>Provider matrix</summary>
-
-| Provider | Auth | Tracks |
-|---|---|---|
-| Codex | OAuth / CLI | Session, Weekly, Credits |
-| Claude | Cookies / OAuth fallback / CLI fallback | Session (5h), Weekly |
-| Cursor | Cookies | Plan, Usage, Billing |
-| Factory | Cookies | Usage |
-| Gemini | gcloud OAuth | Quota |
-| Copilot | GitHub Device Flow / gh CLI / legacy token | Plan usage, Chat |
-| Antigravity | Local LSP | Usage, Per-model quotas |
-| z.ai | API Token | Quota |
-| MiniMax | API / Cookies | Usage, Billing Summary |
-| Kiro | Cookies / CLI | Monthly Credits, Overage |
-| Vertex AI | gcloud OAuth | Cost |
-| Augment | Cookies | Credits |
-| OpenCode | Local Config | Usage |
-| Kimi | Cookies | 5h Rate, Weekly |
-| Kimi K2 | API Key | Credits |
-| Amp | Cookies | Usage |
-| Warp | Local Config | Usage |
-| Ollama | Cookies / API Key | Usage, Cloud Models, Pace windows |
-| Azure OpenAI | API Key | Deployment |
-| T3 Chat | Cookies / cURL | Base, Overage |
-| OpenRouter | API Key | Credits |
-| JetBrains AI | Local Config | Usage |
-| Alibaba | Cookies | Usage |
-| Alibaba Token Plan | Cookies | Token Plan Credits, Reset date |
-| NanoGPT | API Key | Credits |
-| Infini | API Key | Session, Weekly, Quota |
-| Perplexity | Cookies | Credits, Plan |
-| Abacus AI | Cookies | Credits |
-| Mistral | Cookies | Billing, Usage |
-| OpenCode Go | Cookies | Usage, Zen Balance |
-| Kilo | API Key / CLI | Usage |
-| Codebuff | API Key / Local Config | Credits, Weekly |
-| DeepSeek | API Key | Balance, Usage summaries, Cost |
-| Windsurf | Local Cache | Daily, Weekly |
-| Manus | Cookies | Credits, Refresh Credits |
-| Xiaomi MiMo | Cookies | Balance, Token Plan |
-| Doubao | API Key | Request Limits |
-| Command Code | Cookies | Monthly Credits, Purchased Credits |
-| Crof | API Key | Credits, Request Quota |
-| StepFun | Oasis Token | 5h, Weekly, Token refresh |
-| Venice | API Key | USD / DIEM Balance |
-| OpenAI | Admin API / API Key | Usage, Requests, Project-scoped cost, Credit Balance |
-| Grok | Cookies / auth.json | Billing |
-| ElevenLabs | API Key | Subscription Credits, Voice Slots |
-| Deepgram | API Key | Project Usage |
-| Groq | API Key | Enterprise Metrics |
-| LLM Proxy | API Key | Quota Stats |
-
-</details>
-
-## Supported Languages
-
-The UI and contributor reporting currently support:
-
-- English
-- 简体中文
-- 繁體中文（臺灣）
-- 日本語
-- 한국어
-- Español mexicano
-
-## Build From Source
+### Run in development
 
 ```powershell
-# Prerequisites: Node.js + pnpm. Rust and MinGW are installed by the script when needed.
-git clone https://github.com/Finesssee/Win-CodexBar.git
-cd Win-CodexBar
-.\scripts\dev.ps1
+Set-Location apps\desktop-tauri
+pnpm run tauri:dev
 ```
 
-Useful dev flags:
+### Verification commands
 
 ```powershell
-.\scripts\dev.ps1 -Release      # optimized build
-.\scripts\dev.ps1 -SkipBuild    # relaunch the last build
+cargo test --manifest-path rust\Cargo.toml
+cargo test --manifest-path apps\desktop-tauri\src-tauri\Cargo.toml
+
+Set-Location apps\desktop-tauri
+pnpm test
+pnpm run build
 ```
 
-CLI examples:
+Windows-native testing is required for tray behavior, browser-cookie access, DPAPI, installation, and always-on-top overlay behavior.
 
-```bash
-codexbar-cli --help
-codexbar-cli diagnose --pretty
-codexbar-cli usage -p claude
-codexbar-cli usage -p all
-codexbar-cli cost -p codex
-```
+## Verified state
 
-Installer builds include `codexbar.exe` as the tray app and `codexbar-cli.exe` as the console CLI. Start Menu shortcuts launch the desktop app; terminal commands use `codexbar-cli.exe`. `codexbar-desktop.exe` is still installed as a compatibility alias for older shortcuts and autostart entries.
+The committed QA evidence is in [`artifacts/main-v0.45.2-live-qa`](artifacts/main-v0.45.2-live-qa):
 
-## Release Builds
+- release and installed executable hashes
+- settings-preservation evidence
+- authenticated ChatGPT and Claude expiry verification
+- live FloatBar, tray, and X-panel screenshots
+- automated test/build counts and supervisor approval
 
-For local Windows release builds, use the cached release builder:
-
-```powershell
-.\scripts\windows-release-build.ps1 -Ref v0.33.2 -SmokeInstall
-```
-
-The script builds the real Tauri release binary plus the console CLI, verifies signed installer dependencies, packages with Inno Setup, writes installer/portable assets, writes SHA-256 sidecars, and can run a silent install/uninstall smoke test.
-
-More release automation notes live in [docs/release/ci-cd.md](docs/release/ci-cd.md).
+The current installer and executable are unsigned. Always verify the published SHA-256 sidecars.
 
 ## Privacy
 
-- **On-device by default**: provider data is read from known local paths or provider APIs you configure.
-- **Opt-in cookies**: browser-cookie extraction only runs for providers you enable.
-- **Protected secrets**: API keys, manual cookies, and token accounts use the secure-file layer; Windows uses user-scoped DPAPI where available.
-- **Safe diagnostics**: diagnostics expose provider/source/status metadata only, never raw cookies, API keys, bearer tokens, or OAuth values.
-- **Verified updates**: installer downloads require a GitHub SHA-256 digest and are re-verified immediately before apply.
+- Provider data stays local except for requests to the provider APIs you explicitly configure.
+- Browser-cookie import is opt-in.
+- App-managed API keys, manual cookies, and token accounts use the existing secure-file/DPAPI path where available.
+- Diagnostics and screenshots must not expose raw cookies, bearer tokens, API keys, account email, or other secrets.
+- The FloatBar account pill is restricted to plan type and genuine expiry countdown.
 
-## Docs
+## Upstream and license
 
-| Topic | Link |
-|---|---|
-| Building from source | [docs/BUILDING.md](docs/BUILDING.md) |
-| WSL setup and auth tips | [docs/WSL.md](docs/WSL.md) |
-| Browser cookie details | [docs/COOKIES.md](docs/COOKIES.md) |
+- Original project: [steipete/CodexBar](https://github.com/steipete/CodexBar)
+- Windows upstream history: [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar)
+- License: MIT; see [LICENSE](LICENSE)
 
-## Credits
-
-- Original macOS app: [steipete/CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger
-- Inspired by [ccusage](https://github.com/ryoppippi/ccusage) for cost tracking
-
-## License
-
-MIT, same as the original CodexBar.
+This repository contains a customized Windows build. Upstream updates must be re-ported and re-verified before installation because automatic update replacement is intentionally disabled.

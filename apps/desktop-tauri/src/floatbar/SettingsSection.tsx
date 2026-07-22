@@ -135,17 +135,6 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
-          label={t("FloatBarShowCost")}
-          description={t("FloatBarShowCostDescription")}
-          leading
-        >
-          <Toggle
-            checked={settings.floatBarShowCost}
-            disabled={saving || !settings.floatBarEnabled}
-            onChange={(v) => set({ floatBarShowCost: v })}
-          />
-        </Field>
-        <Field
           label={t("FloatBarShowResetInline")}
           description={t("FloatBarShowResetInlineHelper")}
           leading
@@ -154,6 +143,18 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
             checked={settings.floatBarShowResetInline}
             disabled={saving || !settings.floatBarEnabled}
             onChange={(v) => set({ floatBarShowResetInline: v })}
+          />
+        </Field>
+        <Field
+          label={t("FloatBarShowAccount")}
+          description={t("FloatBarShowAccountDescription")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarShowAccount}
+            ariaLabel={t("FloatBarShowAccount")}
+            disabled={saving || !settings.floatBarEnabled}
+            onChange={(v) => set({ floatBarShowAccount: v })}
           />
         </Field>
         <Field

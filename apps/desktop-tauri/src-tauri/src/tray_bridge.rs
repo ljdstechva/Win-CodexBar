@@ -177,7 +177,6 @@ enum MenuAction {
     /// Open (or focus) the dedicated flyout ("Pop Out Dashboard") window.
     OpenFlyout,
     Refresh,
-    CheckForUpdates,
     /// Toggle the enabled/disabled state of the provider with the given CLI name.
     ToggleProvider(String),
     /// Toggle the floating bar window on/off.
@@ -193,7 +192,6 @@ enum MenuTransitionDispatch {
 fn resolve_menu_action(id: &str) -> Option<MenuAction> {
     match id {
         "refresh" => Some(MenuAction::Refresh),
-        "check_for_updates" => Some(MenuAction::CheckForUpdates),
         "quit" => Some(MenuAction::Quit),
         "settings" => Some(MenuAction::OpenSettings("general".into())),
         "about" => Some(MenuAction::OpenSettings("about".into())),
@@ -356,13 +354,6 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
                 let _ = crate::commands::do_refresh_providers(&handle).await;
             });
         }
-        Some(MenuAction::CheckForUpdates) => {
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let state = handle.state::<Mutex<AppState>>();
-                let _ = crate::commands::check_for_updates(handle.clone(), state).await;
-            });
-        }
         Some(MenuAction::ToggleProvider(provider_id)) => {
             let mut settings = Settings::load();
             if settings.enabled_providers.contains(&provider_id) {
@@ -465,30 +456,29 @@ pub fn update_tray_icon_and_tooltip(
     let settings = Settings::load();
     let snapshots = presentation_snapshots(snapshots, settings.codex_spark_usage_visible());
     let ordered_snapshots = ordered_snapshot_refs(&settings, &snapshots);
+    let usage_snapshots: Vec<_> = ordered_snapshots
+        .iter()
+        .copied()
+        .filter(|snapshot| !snapshot.account_only)
+        .collect();
     let ok_snapshots: Vec<_> = ordered_snapshots
         .iter()
         .copied()
-        .filter(|s| s.error.is_none())
+        .filter(|s| !s.account_only && s.error.is_none())
         .collect();
-    let all_error = ok_snapshots.is_empty() && !snapshots.is_empty();
+    let all_error = ok_snapshots.is_empty() && usage_snapshots.iter().any(|s| s.error.is_some());
 
     let prefer_highest = settings.menu_bar_shows_highest_usage
         || settings.menu_bar_display_mode.as_str() == "minimal";
 
     let picked = pick_tray_provider(&ok_snapshots, prefer_highest);
 
-    let (session_pct, weekly_pct) = match picked {
+    let selected_percents = match picked {
         Some(s) => selected_tray_percents(s, &settings),
-        None => (
-            ok_snapshots
-                .iter()
-                .map(|s| selected_tray_percents(s, &settings).0)
-                .fold(0.0_f64, f64::max),
-            None,
-        ),
+        None => SelectedTrayPercents::default(),
     };
 
-    let (rgba, w, h) = render_tray_icon_for_settings(&settings, session_pct, weekly_pct, all_error);
+    let (rgba, w, h) = render_tray_icon_for_settings(&settings, selected_percents, all_error);
     let icon = Image::new_owned(rgba, w, h);
     let _ = tray.set_icon(Some(icon));
 
@@ -505,7 +495,7 @@ fn status_labels_for_settings(
     let ordered_snapshots = ordered_snapshot_refs(settings, snapshots);
     let healthy: Vec<_> = ordered_snapshots
         .into_iter()
-        .filter(|s| s.error.is_none())
+        .filter(|s| !s.account_only && s.error.is_none())
         .collect();
     if settings.tray_icon_mode == TrayIconMode::PerProvider {
         return healthy
@@ -562,14 +552,20 @@ fn provider_status_label(
 
 fn render_tray_icon_for_settings(
     settings: &Settings,
-    session_pct: f64,
-    weekly_pct: Option<f64>,
+    percents: SelectedTrayPercents,
     all_error: bool,
 ) -> (Vec<u8>, u32, u32) {
     if settings.menu_bar_shows_percent {
-        render_percent_icon_rgba(session_pct, all_error)
+        render_percent_icon_rgba(percents.primary.display, percents.primary.used, all_error)
     } else {
-        render_bar_icon_rgba(session_pct, weekly_pct, all_error)
+        render_bar_icon_rgba(
+            percents.primary.display,
+            percents.primary.used,
+            percents
+                .secondary
+                .map(|weekly| (weekly.display, weekly.used)),
+            all_error,
+        )
     }
 }
 
@@ -581,25 +577,48 @@ fn pick_tray_provider<'a>(
     ok_snapshots: &'a [&'a crate::commands::ProviderUsageSnapshot],
     prefer_highest: bool,
 ) -> Option<&'a crate::commands::ProviderUsageSnapshot> {
-    if ok_snapshots.is_empty() {
-        return None;
-    }
+    let usage_snapshots = ok_snapshots
+        .iter()
+        .copied()
+        .filter(|snapshot| !snapshot.account_only);
     if prefer_highest {
-        ok_snapshots.iter().copied().max_by(|a, b| {
+        usage_snapshots.max_by(|a, b| {
             a.primary
                 .used_percent
                 .partial_cmp(&b.primary.used_percent)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
     } else {
-        Some(ok_snapshots[0])
+        usage_snapshots.into_iter().next()
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct TrayMetricPercents {
+    display: f64,
+    used: f64,
+}
+
+impl TrayMetricPercents {
+    fn from_used(used_percent: f64, show_as_used: bool) -> Self {
+        let used = used_percent.clamp(0.0, 100.0);
+        Self {
+            display: display_metric_percent(used, show_as_used),
+            used,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct SelectedTrayPercents {
+    primary: TrayMetricPercents,
+    secondary: Option<TrayMetricPercents>,
 }
 
 fn selected_tray_percents(
     snapshot: &crate::commands::ProviderUsageSnapshot,
     settings: &Settings,
-) -> (f64, Option<f64>) {
+) -> SelectedTrayPercents {
     let provider = ProviderId::from_cli_name(snapshot.provider_id.as_str());
     let preference = provider
         .map(|id| settings.get_provider_metric(id))
@@ -611,12 +630,12 @@ fn selected_tray_percents(
     let secondary = snapshot
         .secondary
         .as_ref()
-        .map(|w| display_metric_percent(w.used_percent, settings.show_as_used));
+        .map(|w| TrayMetricPercents::from_used(w.used_percent, settings.show_as_used));
 
-    (
-        display_metric_percent(primary, settings.show_as_used),
+    SelectedTrayPercents {
+        primary: TrayMetricPercents::from_used(primary, settings.show_as_used),
         secondary,
-    )
+    }
 }
 
 fn display_metric_percent(used_percent: f64, show_as_used: bool) -> f64 {
@@ -749,13 +768,9 @@ fn build_tooltip(
 ) -> String {
     use codexbar::locale::{LocaleKey, get_text};
 
-    if snapshots.is_empty() {
-        return "CodexBar Desktop".to_string();
-    }
-
     let error_label = get_text(lang, LocaleKey::TrayStatusRowError);
     let mut lines = Vec::with_capacity(snapshots.len() + 1);
-    for s in snapshots {
+    for s in snapshots.iter().filter(|snapshot| !snapshot.account_only) {
         let status = if let Some(ref err) = s.error {
             let short = truncate_tooltip_text(err, 36);
             format!("{}: {} ({})", s.display_name, error_label, short)
@@ -764,6 +779,10 @@ fn build_tooltip(
             format!("{}: {}", s.display_name, truncate_tooltip_text(&label, 42))
         };
         lines.push(status);
+    }
+
+    if lines.is_empty() {
+        return "CodexBar Desktop".to_string();
     }
 
     format!("CodexBar\n{}", lines.join("\n"))
@@ -856,6 +875,11 @@ fn build_native_menu_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rgba_pixel(rgba: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let index = ((y * width + x) * 4) as usize;
+        rgba[index..index + 4].try_into().expect("RGBA pixel")
+    }
 
     fn sample_provider_catalog() -> Vec<ProviderCatalogEntry> {
         vec![
@@ -1088,6 +1112,7 @@ mod tests {
                 reserve_will_last_to_reset: false,
                 reserve_eta_seconds: None,
             },
+            account_only: false,
             primary_label: None,
             secondary: secondary_percent.map(|pct| crate::commands::RateWindowSnapshot {
                 used_percent: pct,
@@ -1129,11 +1154,13 @@ mod tests {
                 formatted_limit: Some(format!("${limit:.2}")),
             }),
             plan_name: None,
+            subscription_ends_at: None,
             account_email: None,
             source_label: String::new(),
             updated_at: "2025-01-01T00:00:00Z".into(),
             error: None,
             pace: None,
+            weekly_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -1197,6 +1224,26 @@ mod tests {
         let refs: Vec<&crate::commands::ProviderUsageSnapshot> = vec![];
         assert!(pick_tray_provider(&refs, true).is_none());
         assert!(pick_tray_provider(&refs, false).is_none());
+    }
+
+    #[test]
+    fn account_only_snapshots_never_drive_usage_tray_metrics() {
+        let mut account = fake_snapshot("chatgpt", "ChatGPT", 0.0);
+        account.account_only = true;
+        let quota = fake_snapshot("claude", "Claude", 42.0);
+        let refs = vec![&account, &quota];
+
+        assert_eq!(
+            pick_tray_provider(&refs, false)
+                .expect("quota provider")
+                .provider_id,
+            "claude"
+        );
+        assert!(pick_tray_provider(&[&account], false).is_none());
+        assert_eq!(
+            build_tooltip(&[account], codexbar::settings::Language::English),
+            "CodexBar Desktop"
+        );
     }
 
     #[test]
@@ -1264,13 +1311,87 @@ mod tests {
             ..Settings::default()
         };
 
-        let (bar, bar_w, bar_h) =
-            render_tray_icon_for_settings(&bar_settings, 72.0, Some(40.0), false);
+        let percents = SelectedTrayPercents {
+            primary: TrayMetricPercents::from_used(72.0, true),
+            secondary: Some(TrayMetricPercents::from_used(40.0, true)),
+        };
+        let (bar, bar_w, bar_h) = render_tray_icon_for_settings(&bar_settings, percents, false);
         let (percent, pct_w, pct_h) =
-            render_tray_icon_for_settings(&percent_settings, 72.0, Some(40.0), false);
+            render_tray_icon_for_settings(&percent_settings, percents, false);
 
         assert_eq!((bar_w, bar_h), (pct_w, pct_h));
         assert_ne!(bar, percent);
+    }
+
+    #[test]
+    fn usage_left_bar_is_full_green_at_zero_used() {
+        let settings = Settings {
+            show_as_used: false,
+            menu_bar_shows_percent: false,
+            ..Settings::default()
+        };
+        let snapshot = fake_snapshot("codex", "Codex", 0.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        let (rgba, width, _) = render_tray_icon_for_settings(&settings, percents, false);
+        let (r, g, b) = codexbar::tray::icon::UsageLevel::Low.color();
+
+        assert_eq!(percents.primary.display, 100.0);
+        assert_eq!(percents.primary.used, 0.0);
+        assert_eq!(rgba_pixel(&rgba, width, 26, 16), [r, g, b, 255]);
+    }
+
+    #[test]
+    fn usage_left_bar_is_small_and_red_at_ninety_seven_used() {
+        let settings = Settings {
+            show_as_used: false,
+            menu_bar_shows_percent: false,
+            ..Settings::default()
+        };
+        let snapshot = fake_snapshot("codex", "Codex", 97.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        let (rgba, width, _) = render_tray_icon_for_settings(&settings, percents, false);
+        let (r, g, b) = codexbar::tray::icon::UsageLevel::Critical.color();
+
+        assert_eq!(percents.primary.display, 3.0);
+        assert_eq!(percents.primary.used, 97.0);
+        assert_eq!(rgba_pixel(&rgba, width, 4, 16), [r, g, b, 255]);
+        assert_eq!(rgba_pixel(&rgba, width, 5, 16), [80, 80, 90, 255]);
+    }
+
+    #[test]
+    fn used_bar_remains_nearly_full_and_red_at_ninety_seven_used() {
+        let settings = Settings {
+            show_as_used: true,
+            menu_bar_shows_percent: false,
+            ..Settings::default()
+        };
+        let snapshot = fake_snapshot("codex", "Codex", 97.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        let (rgba, width, _) = render_tray_icon_for_settings(&settings, percents, false);
+        let (r, g, b) = codexbar::tray::icon::UsageLevel::Critical.color();
+
+        assert_eq!(percents.primary.display, 97.0);
+        assert_eq!(rgba_pixel(&rgba, width, 26, 16), [r, g, b, 255]);
+        assert_eq!(rgba_pixel(&rgba, width, 27, 16), [80, 80, 90, 255]);
+    }
+
+    #[test]
+    fn usage_left_percent_icon_draws_one_hundred_in_green() {
+        let settings = Settings {
+            show_as_used: false,
+            menu_bar_shows_percent: true,
+            ..Settings::default()
+        };
+        let snapshot = fake_snapshot("codex", "Codex", 0.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        let (rgba, width, _) = render_tray_icon_for_settings(&settings, percents, false);
+        let (r, g, b) = codexbar::tray::icon::UsageLevel::Low.color();
+        let green = [r, g, b, 255];
+
+        assert_eq!(rgba_pixel(&rgba, width, 8, 11), green);
+        assert_eq!(rgba_pixel(&rgba, width, 13, 11), green);
+        assert_eq!(rgba_pixel(&rgba, width, 20, 11), green);
+        assert_eq!(rgba_pixel(&rgba, width, 6, 11), [60, 60, 70, 255]);
     }
 
     #[test]
@@ -1344,7 +1465,10 @@ mod tests {
 
     #[test]
     fn selected_tray_percent_uses_cursor_extra_usage_cost() {
-        let mut settings = Settings::default();
+        let mut settings = Settings {
+            show_as_used: true,
+            ..Settings::default()
+        };
         settings.set_provider_metric(ProviderId::Cursor, MetricPreference::ExtraUsage);
         let snapshot = fake_snapshot_with(
             "cursor",
@@ -1355,34 +1479,64 @@ mod tests {
             Some((15.0, 100.0)),
         );
 
-        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+        let percents = selected_tray_percents(&snapshot, &settings);
 
-        assert_eq!(primary, 15.0);
-        assert_eq!(secondary, Some(20.0));
+        assert_eq!(
+            percents.primary,
+            TrayMetricPercents {
+                display: 15.0,
+                used: 15.0
+            }
+        );
+        assert_eq!(
+            percents.secondary,
+            Some(TrayMetricPercents {
+                display: 20.0,
+                used: 20.0
+            })
+        );
     }
 
     #[test]
     fn selected_tray_percent_tracks_extra_rate_window() {
-        let mut settings = Settings::default();
+        let mut settings = Settings {
+            show_as_used: true,
+            ..Settings::default()
+        };
         settings.set_provider_metric(ProviderId::Copilot, MetricPreference::ExtraUsage);
         let mut snapshot = fake_snapshot("copilot", "Copilot", 20.0);
         snapshot.extra_rate_windows.push(fake_extra_window(42.0));
 
-        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+        let percents = selected_tray_percents(&snapshot, &settings);
 
-        assert_eq!(primary, 42.0);
-        assert_eq!(secondary, None);
+        assert_eq!(
+            percents.primary,
+            TrayMetricPercents {
+                display: 42.0,
+                used: 42.0
+            }
+        );
+        assert_eq!(percents.secondary, None);
     }
 
     #[test]
     fn copilot_automatic_tracks_highest_extra_rate_window() {
-        let settings = Settings::default();
+        let settings = Settings {
+            show_as_used: true,
+            ..Settings::default()
+        };
         let mut snapshot = fake_snapshot("copilot", "Copilot", 20.0);
         snapshot.extra_rate_windows.push(fake_extra_window(42.0));
 
-        let (primary, _) = selected_tray_percents(&snapshot, &settings);
+        let percents = selected_tray_percents(&snapshot, &settings);
 
-        assert_eq!(primary, 42.0);
+        assert_eq!(
+            percents.primary,
+            TrayMetricPercents {
+                display: 42.0,
+                used: 42.0
+            }
+        );
     }
 
     #[test]
@@ -1401,21 +1555,42 @@ mod tests {
             Some((15.0, 100.0)),
         );
 
-        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+        let percents = selected_tray_percents(&snapshot, &settings);
 
-        assert_eq!(primary, 85.0);
-        assert_eq!(secondary, Some(80.0));
+        assert_eq!(
+            percents.primary,
+            TrayMetricPercents {
+                display: 85.0,
+                used: 15.0
+            }
+        );
+        assert_eq!(
+            percents.secondary,
+            Some(TrayMetricPercents {
+                display: 80.0,
+                used: 20.0
+            })
+        );
     }
 
     #[test]
     fn selected_tray_percent_falls_back_when_extra_usage_missing() {
-        let mut settings = Settings::default();
+        let mut settings = Settings {
+            show_as_used: true,
+            ..Settings::default()
+        };
         settings.set_provider_metric(ProviderId::Cursor, MetricPreference::ExtraUsage);
         let snapshot = fake_snapshot_with("cursor", "Cursor", 10.0, Some(72.0), None, None);
 
-        let (primary, _) = selected_tray_percents(&snapshot, &settings);
+        let percents = selected_tray_percents(&snapshot, &settings);
 
-        assert_eq!(primary, 72.0);
+        assert_eq!(
+            percents.primary,
+            TrayMetricPercents {
+                display: 72.0,
+                used: 72.0
+            }
+        );
     }
 
     #[test]
@@ -1427,14 +1602,14 @@ mod tests {
 
         // Session preference must not paint the synthetic 0% primary;
         // it falls through to Automatic which prefers weekly (42%).
-        let (primary, _) = selected_tray_percents(&snapshot, &settings);
-        assert_eq!(primary, 42.0);
-        assert_ne!(primary, 0.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        assert_eq!(percents.primary.used, 42.0);
+        assert_ne!(percents.primary.used, 0.0);
 
         // Automatic also prefers weekly over informational primary.
         settings.set_provider_metric(ProviderId::Claude, MetricPreference::Automatic);
-        let (primary, _) = selected_tray_percents(&snapshot, &settings);
-        assert_eq!(primary, 42.0);
+        let percents = selected_tray_percents(&snapshot, &settings);
+        assert_eq!(percents.primary.used, 42.0);
 
         // Direct Session arm returns None when primary is informational.
         assert_eq!(

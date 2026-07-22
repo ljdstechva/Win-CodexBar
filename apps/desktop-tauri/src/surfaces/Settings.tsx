@@ -55,36 +55,16 @@ const TabIcons: Record<SettingsTab, ReactElement> = {
   ),
   providers: (
     <Svg>
-      <circle cx="4" cy="4" r="1.5" />
-      <circle cx="12" cy="4" r="1.5" />
-      <circle cx="8" cy="12" r="1.5" />
-      <path d="M5.3 4.8 7.2 10M10.7 4.8 8.8 10M5.5 4h5" />
-    </Svg>
-  ),
-  notifications: (
-    <Svg>
-      <path d="M3.5 11.5h9l-1.2-1.8V7a3.3 3.3 0 0 0-6.6 0v2.7Z" />
-      <path d="M6.5 13a1.7 1.7 0 0 0 3 0" />
-    </Svg>
-  ),
-  menuBar: (
-    <Svg>
-      <path d="M1.5 8c1.6-3 4-4.5 6.5-4.5S13 5 14.5 8c-1.5 3-4 4.5-6.5 4.5S3.1 11 1.5 8Z" />
-      <circle cx="8" cy="8" r="2" />
-    </Svg>
-  ),
-  menu: (
-    <Svg>
       <rect x="2" y="2" width="5" height="5" rx="1" />
       <rect x="9" y="2" width="5" height="5" rx="1" />
       <rect x="2" y="9" width="5" height="5" rx="1" />
       <rect x="9" y="9" width="5" height="5" rx="1" />
     </Svg>
   ),
-  usageSpend: (
+  display: (
     <Svg>
-      <path d="M2 12.5V4.5h12v8" />
-      <path d="M4.5 10V8M7.5 10V6.5M10.5 10V7.2M13 10V5.5" />
+      <path d="M1.5 8c1.6-3 4-4.5 6.5-4.5S13 5 14.5 8c-1.5 3-4 4.5-6.5 4.5S3.1 11 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
     </Svg>
   ),
   advanced: (
@@ -107,30 +87,37 @@ const TabIcons: Record<SettingsTab, ReactElement> = {
 export const TAB_META: { id: SettingsTab; labelKey: LocaleKey }[] = [
   { id: "general", labelKey: "TabGeneral" },
   { id: "providers", labelKey: "TabProviders" },
-  { id: "notifications", labelKey: "TabNotifications" },
-  { id: "menuBar", labelKey: "TabMenuBar" },
-  { id: "menu", labelKey: "TabMenu" },
-  { id: "usageSpend", labelKey: "TabUsageSpend" },
+  { id: "display", labelKey: "TabDisplay" },
   { id: "advanced", labelKey: "TabAdvanced" },
   { id: "about", labelKey: "TabAbout" },
 ];
 
-function isSettingsTab(value: string): value is SettingsTab {
-  return TAB_META.some((t) => t.id === value);
+function normalizeSettingsTab(value: string | null | undefined): SettingsTab | null {
+  if (value === "notifications") return "general";
+  if (value === "menuBar" || value === "menu") return "display";
+  if (value === "usageSpend") return "advanced";
+  return TAB_META.some((tab) => tab.id === value)
+    ? (value as SettingsTab)
+    : null;
 }
 
 const SETTINGS_WINDOW_HEIGHT = 580;
-const SETTINGS_WINDOW_WIDTH = 600;
+const SETTINGS_WINDOW_DEFAULT_WIDTH = 496;
+const SETTINGS_WINDOW_PROVIDERS_WIDTH = 600;
 
-async function applySettingsWindowSize() {
+async function applySettingsWindowSize(tab: SettingsTab) {
+  const requestedWidth =
+    tab === "providers"
+      ? SETTINGS_WINDOW_PROVIDERS_WIDTH
+      : SETTINGS_WINDOW_DEFAULT_WIDTH;
   const workArea = await getWorkAreaRect().catch(() => null);
-  const screenWidth = window.screen.availWidth || window.innerWidth || SETTINGS_WINDOW_WIDTH;
+  const screenWidth = window.screen.availWidth || window.innerWidth || requestedWidth;
   const screenHeight = window.screen.availHeight || window.innerHeight || SETTINGS_WINDOW_HEIGHT;
   const maxWidth = Math.min(workArea?.width ?? screenWidth, screenWidth);
   const maxHeight = Math.min(workArea?.height ?? screenHeight, screenHeight);
   const width = Math.max(
     360,
-    Math.min(SETTINGS_WINDOW_WIDTH, maxWidth - 16),
+    Math.min(requestedWidth, maxWidth - 16),
   );
   const height = Math.max(
     360,
@@ -158,36 +145,40 @@ export default function Settings({ state, initialTab: propTab }: { state: Bootst
   const { settings, saving, error, update } = useSettings(state.settings);
   const { t } = useLocale();
   const shellTarget = useSurfaceTarget("settings");
-  const initialTab: SettingsTab =
-    propTab && isSettingsTab(propTab)
-      ? propTab
-      : shellTarget?.kind === "settings" && isSettingsTab(shellTarget.tab)
-        ? shellTarget.tab
-        : "general";
+  const initialTab =
+    normalizeSettingsTab(propTab) ??
+    (shellTarget?.kind === "settings"
+      ? normalizeSettingsTab(shellTarget.tab)
+      : null) ??
+    "general";
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   useEffect(() => {
-    void applySettingsWindowSize();
-  }, []);
+    void applySettingsWindowSize(initialTab);
+  }, [initialTab]);
 
   // Respond to prop-driven tab changes (detached window re-focus events).
   useEffect(() => {
-    if (propTab && isSettingsTab(propTab)) {
+    const normalized = normalizeSettingsTab(propTab);
+    if (normalized) {
       setActiveTab((current) => {
-        if (current === propTab) return current;
-        return propTab;
+        if (current === normalized) return current;
+        void applySettingsWindowSize(normalized);
+        return normalized;
       });
     }
   }, [propTab]);
 
   useEffect(() => {
-    if (shellTarget?.kind !== "settings" || !isSettingsTab(shellTarget.tab)) {
+    if (shellTarget?.kind !== "settings") {
       return;
     }
 
-    const nextTab: SettingsTab = shellTarget.tab;
+    const nextTab = normalizeSettingsTab(shellTarget.tab);
+    if (!nextTab) return;
     setActiveTab((current) => {
       if (current === nextTab) return current;
+      void applySettingsWindowSize(nextTab);
       return nextTab;
     });
   }, [shellTarget]);
@@ -195,6 +186,7 @@ export default function Settings({ state, initialTab: propTab }: { state: Bootst
   const set = (patch: SettingsUpdate) => void update(patch);
   const handleTabClick = useCallback((tab: SettingsTab) => {
     setActiveTab(tab);
+    void applySettingsWindowSize(tab);
     // Only transition the main window if we're NOT in the detached settings window
     if (getCurrentWebviewWindow().label !== "settings") {
       void setSurfaceMode("settings", { kind: "settings", tab });
@@ -256,7 +248,7 @@ export default function Settings({ state, initialTab: propTab }: { state: Bootst
       {/* tab panels */}
       <div className={`settings-body${activeTab === "providers" ? " settings-body--providers" : ""}`}>
         {activeTab === "general" && (
-          <GeneralTab mode="general" settings={settings} set={set} saving={saving} />
+          <GeneralTab settings={settings} set={set} saving={saving} />
         )}
         {activeTab === "providers" && (
           <ProvidersTab
@@ -266,20 +258,14 @@ export default function Settings({ state, initialTab: propTab }: { state: Bootst
             saving={saving}
           />
         )}
-        {activeTab === "notifications" && (
-          <GeneralTab mode="notifications" settings={settings} set={set} saving={saving} />
-        )}
-        {activeTab === "menuBar" && (
-          <DisplayTab mode="menuBar" settings={settings} set={set} saving={saving} />
-        )}
-        {activeTab === "menu" && (
-          <DisplayTab mode="menu" settings={settings} set={set} saving={saving} />
-        )}
-        {activeTab === "usageSpend" && (
-          <UsageSpendTab settings={settings} set={set} saving={saving} />
+        {activeTab === "display" && (
+          <DisplayTab settings={settings} set={set} saving={saving} />
         )}
         {activeTab === "advanced" && (
-          <AdvancedTab settings={settings} set={set} saving={saving} />
+          <>
+            <AdvancedTab settings={settings} set={set} saving={saving} />
+            <UsageSpendTab settings={settings} set={set} saving={saving} />
+          </>
         )}
         {activeTab === "about" && (
           <AboutTab settings={settings} set={set} saving={saving} />

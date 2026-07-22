@@ -266,10 +266,13 @@ fn result_from_grants(grants: &CreditGrantsResponse) -> ProviderFetchResult {
         primary.used_percent = 0.0;
     }
 
-    let usage = UsageSnapshot::new(primary).with_login_method(format!(
+    let mut usage = UsageSnapshot::new(primary).with_login_method(format!(
         "API balance: ${:.2}",
         grants.total_available.max(0.0)
     ));
+    if let Some(expiry) = next_expiry {
+        usage = usage.with_subscription_ends_at(expiry);
+    }
     let cost = CostSnapshot::new(grants.total_used.max(0.0), "USD", "API credits")
         .with_limit(grants.total_granted.max(0.0));
     let cost = if let Some(expiry) = next_expiry {
@@ -564,6 +567,26 @@ mod tests {
         });
         assert_eq!(result.usage.primary.used_percent, 25.0);
         assert_eq!(result.cost.unwrap().remaining(), Some(75.0));
+    }
+
+    #[test]
+    fn openai_api_credit_snapshot_carries_genuine_grant_expiry() {
+        let expiry = 2_000_000_000;
+        let result = result_from_grants(&CreditGrantsResponse {
+            total_granted: 100.0,
+            total_used: 25.0,
+            total_available: 75.0,
+            grants: Some(CreditGrantList {
+                data: vec![CreditGrant {
+                    expires_at: Some(expiry),
+                }],
+            }),
+        });
+
+        assert_eq!(
+            result.usage.subscription_ends_at,
+            Utc.timestamp_opt(expiry, 0).single()
+        );
     }
 
     #[test]

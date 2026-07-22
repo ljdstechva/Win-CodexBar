@@ -26,7 +26,6 @@ use crate::surface_target::SurfaceTarget;
 mod chart;
 mod diagnostics;
 mod tokens;
-mod updater;
 mod usage_spend;
 
 mod agent_sessions;
@@ -63,7 +62,6 @@ mod tests;
 pub use chart::*;
 pub use diagnostics::*;
 pub use tokens::*;
-pub use updater::*;
 pub use usage_spend::*;
 
 const PROVIDER_CACHE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);

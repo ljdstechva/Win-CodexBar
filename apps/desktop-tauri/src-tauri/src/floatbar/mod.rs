@@ -46,7 +46,7 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) -
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             // Probe first (no I/O). Load style only when recovery runs.
             // Always reassert topmost on geometry change; the visibility-scoped
-            // topmost_guard timer stays overlap-gated.
+            // guard also repairs later topmost-window and shell reordering.
             let relocated = if window::is_off_all_monitors(window) {
                 let style = Settings::load().float_bar_style;
                 window::recover_onto_primary(window, &style)
@@ -114,7 +114,7 @@ pub fn apply_state(app: &tauri::AppHandle, settings: &Settings) {
     }
 }
 
-/// All five settings fields the float bar owns, in a single optional
+/// The settings fields the float bar owns, in a single optional
 /// patch. Used by `update_settings` so the bulk of float-bar plumbing
 /// stays in this module rather than spread across the settings handler.
 #[derive(Debug, Default)]
@@ -129,6 +129,7 @@ pub struct SettingsPatch {
     pub dark_text: Option<bool>,
     pub show_reset_inline: Option<bool>,
     pub show_cost: Option<bool>,
+    pub show_account: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -143,6 +144,7 @@ impl SettingsPatch {
             && self.dark_text.is_none()
             && self.show_reset_inline.is_none()
             && self.show_cost.is_none()
+            && self.show_account.is_none()
     }
 
     /// Apply this patch to a mutable `Settings`. Values are clamped and
@@ -177,6 +179,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
+        }
+        if let Some(v) = self.show_account {
+            settings.float_bar_show_account = v;
         }
     }
 }
@@ -231,6 +236,7 @@ mod tests {
             style: Some("taskbar".into()),
             dark_text: Some(true),
             show_reset_inline: Some(true),
+            show_account: Some(false),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
@@ -240,6 +246,7 @@ mod tests {
         assert_eq!(s.float_bar_style, "taskbar");
         assert!(s.float_bar_dark_text);
         assert!(s.float_bar_show_reset_inline);
+        assert!(!s.float_bar_show_account);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -276,5 +283,6 @@ mod tests {
             s.float_bar_show_reset_inline,
             original.float_bar_show_reset_inline
         );
+        assert_eq!(s.float_bar_show_account, original.float_bar_show_account);
     }
 }

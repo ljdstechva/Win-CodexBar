@@ -2,8 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
-  checkForUpdates,
-  downloadUpdate,
   getBootstrapState,
   getSettingsSnapshot,
   setSurfaceMode,
@@ -12,13 +10,13 @@ import { useSurfaceSnapshot } from "./hooks/useSurfaceSnapshot";
 import { useTheme } from "./hooks/useTheme";
 import { useLocale } from "./hooks/useLocale";
 import TrayPanel from "./surfaces/TrayPanel";
+import Settings from "./surfaces/Settings";
+import PopOutPanel from "./surfaces/PopOutPanel";
 import { FLOATBAR_WINDOW_LABEL } from "./floatbar/api";
 import { LocaleProvider } from "./i18n/LocaleProvider";
 import type { BootstrapState, ThemePreference } from "./types/bridge";
 import type { SurfaceSnapshot } from "./hooks/useSurfaceSnapshot";
 
-const Settings = lazy(() => import("./surfaces/Settings"));
-const PopOutPanel = lazy(() => import("./surfaces/PopOutPanel"));
 const FloatBar = lazy(() => import("./floatbar/FloatBar"));
 
 function SurfaceFallback() {
@@ -86,18 +84,6 @@ function AppInner() {
         }
       });
 
-    // Fire-and-forget update checks after the first paint so startup/tray open
-    // is not competing with network work.
-    const updateTimer = window.setTimeout(() => {
-      Promise.all([checkForUpdates(), getSettingsSnapshot()])
-        .then(([update, settings]) => {
-          if (settings.autoDownloadUpdates && update.canDownload) {
-            void downloadUpdate().catch(() => {});
-          }
-        })
-        .catch(() => {});
-    }, 2_000);
-
     // Listen for user-registered global shortcut events from the
     // `register_global_shortcut` command. The persistent shortcut (bound via
     // shortcut_bridge::plugin) already opens the PopOut dashboard natively;
@@ -139,7 +125,6 @@ function AppInner() {
       void unlistenSettingsChangePromise
         .then((unlisten) => unlisten?.())
         .catch(() => {});
-      window.clearTimeout(updateTimer);
       window.removeEventListener("codexbar:settings-updated", onSettingsUpdated);
     };
   }, [reloadBootstrapState]);
@@ -207,18 +192,10 @@ function SurfaceRouter({
         surface.target.kind === "provider"
           ? surface.target.providerId
           : undefined;
-      return (
-        <Suspense fallback={<SurfaceFallback />}>
-          <PopOutPanel state={state} providerId={providerId} />
-        </Suspense>
-      );
+      return <PopOutPanel state={state} providerId={providerId} />;
     }
     case "settings":
-      return (
-        <Suspense fallback={<SurfaceFallback />}>
-          <SettingsLayout state={state} />
-        </Suspense>
-      );
+      return <SettingsLayout state={state} />;
     default:
       return <TrayPanel state={state} />;
   }
@@ -247,10 +224,8 @@ function DetachedSettingsApp({ state }: { state: BootstrapState }) {
   }, []);
 
   return (
-    <Suspense fallback={<SurfaceFallback />}>
-      <main className="settings-surface settings-surface--full">
-        <Settings state={state} initialTab={tab} />
-      </main>
-    </Suspense>
+    <main className="settings-surface settings-surface--full">
+      <Settings state={state} initialTab={tab} />
+    </main>
   );
 }

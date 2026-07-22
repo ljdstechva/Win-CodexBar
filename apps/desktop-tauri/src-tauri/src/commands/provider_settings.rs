@@ -23,21 +23,22 @@ pub(crate) fn build_provider_summaries(settings: &Settings) -> Vec<ProviderSumma
 
     order
         .iter()
-        .enumerate()
-        .filter_map(|(idx, id)| {
+        .filter_map(|id| {
             by_id.get(id).and_then(|p| {
                 let enabled = settings.enabled_providers.contains(id);
                 // Soft-removed providers (upstream #2254) stay hidden unless already enabled.
                 if p.is_deprecated() && !enabled {
                     return None;
                 }
-                Some(ProviderSummary {
-                    id: id.clone(),
-                    display_name: p.display_name().to_string(),
-                    enabled,
-                    order: idx as u32,
-                })
+                Some((id, p, enabled))
             })
+        })
+        .enumerate()
+        .map(|(idx, (id, provider, enabled))| ProviderSummary {
+            id: id.clone(),
+            display_name: provider.display_name().to_string(),
+            enabled,
+            order: idx as u32,
         })
         .collect()
 }
@@ -65,6 +66,7 @@ fn cookie_source_provider(provider_id: &str) -> Option<codexbar::core::ProviderI
     use codexbar::core::ProviderId;
     Some(match provider_id {
         "codex" => ProviderId::Codex,
+        "chatgpt" => ProviderId::ChatGPT,
         "claude" => ProviderId::Claude,
         "cursor" => ProviderId::Cursor,
         "opencode" => ProviderId::OpenCode,
@@ -386,6 +388,22 @@ fn cookie_option(
 /// Empty vec means the provider does not expose a cookie-source picker.
 pub fn cookie_source_options_for(provider_id: &str, lang: Language) -> Vec<CookieSourceOption> {
     match provider_id {
+        "chatgpt" => vec![
+            cookie_option(
+                lang,
+                "auto",
+                "Automatic imports browser cookies from chatgpt.com.",
+                "",
+                None,
+            ),
+            cookie_option(
+                lang,
+                "manual",
+                "",
+                "Paste a Cookie header from a chatgpt.com request.",
+                None,
+            ),
+        ],
         "codex" => vec![
             cookie_option(
                 lang,

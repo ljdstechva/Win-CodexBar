@@ -29,6 +29,9 @@ export interface TrayPanelLayoutOptions {
   /** Whether the flyout is currently open (surface mode === trayPanel). Used as
    *  the "just opened" trigger for the fixed-size restore + re-anchor. */
   isOpen?: boolean;
+  /** Optional minimum logical height used only while auto-fitting transient
+   *  overlays that do not participate in content measurement. */
+  minHeightFloor?: number;
   /** Called with the new logical size on a genuine user drag-resize. */
   onUserResize?: (width: number, height: number) => void;
 }
@@ -46,6 +49,7 @@ export function useTrayPanelLayout({
   autoFit = true,
   fixedSize = null,
   isOpen = false,
+  minHeightFloor,
   onUserResize,
 }: TrayPanelLayoutOptions): TrayPanelLayout {
   const [layoutReady, setLayoutReady] = useState(false);
@@ -182,11 +186,12 @@ export function useTrayPanelLayout({
   useEffect(() => {
     if (!autoFit || !canMeasure) return;
 
-    const minHeight = detailMode
+    const contentMinHeight = detailMode
       ? TRAY_DETAIL_MIN_HEIGHT
       : denseOverview
         ? TRAY_DENSE_OVERVIEW_HEIGHT
         : TRAY_OVERVIEW_MIN_HEIGHT;
+    const minHeight = Math.max(contentMinHeight, minHeightFloor ?? 0);
 
     const resize = async () => {
       const run = ++resizeRunRef.current;
@@ -331,7 +336,15 @@ export function useTrayPanelLayout({
       window.clearTimeout(timer);
       resizeRunRef.current += 1;
     };
-  }, [autoFit, canMeasure, denseOverview, detailMode, layoutRevision, applySize]);
+  }, [
+    autoFit,
+    canMeasure,
+    denseOverview,
+    detailMode,
+    layoutRevision,
+    minHeightFloor,
+    applySize,
+  ]);
 
   return { layoutReady, requestLayout };
 }

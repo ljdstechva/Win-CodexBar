@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use regex_lite::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -407,8 +407,36 @@ impl TtyCommandRunner {
             }
         });
 
-        // Initial delay
-        std::thread::sleep(Duration::from_secs_f64(options.initial_delay_secs));
+        // Service terminal startup handshakes during the initial delay. On
+        // Windows, cmd.exe can request a cursor position before it will accept
+        // scripted input; sending the script first lets that request consume
+        // command bytes under load.
+        let initial_delay = Duration::from_secs_f64(options.initial_delay_secs);
+        let initial_delay_start = Instant::now();
+        let mut prefetched_output = VecDeque::new();
+        while initial_delay_start.elapsed() < initial_delay {
+            let remaining = initial_delay.saturating_sub(initial_delay_start.elapsed());
+            match rx.recv_timeout(remaining.min(Duration::from_millis(50))) {
+                Ok(chunk) => {
+                    if chunk.contains("\x1b[6n") {
+                        let _ = write!(writer, "\x1b[1;1R");
+                        let _ = writer.flush();
+                    }
+                    last_output_time = Instant::now();
+                    prefetched_output.push_back(chunk);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        while let Ok(chunk) = rx.try_recv() {
+            if chunk.contains("\x1b[6n") {
+                let _ = write!(writer, "\x1b[1;1R");
+                let _ = writer.flush();
+            }
+            last_output_time = Instant::now();
+            prefetched_output.push_back(chunk);
+        }
 
         // Send the script if provided. PTYs expect carriage-return line endings
         // for interactive programs to treat writes like pressing Enter.
@@ -462,14 +490,22 @@ impl TtyCommandRunner {
             }
 
             // Read available output
-            while let Ok(chunk) = rx.try_recv() {
+            loop {
+                let (chunk, cursor_request_handled) =
+                    if let Some(chunk) = prefetched_output.pop_front() {
+                        (chunk, true)
+                    } else if let Ok(chunk) = rx.try_recv() {
+                        (chunk, false)
+                    } else {
+                        break;
+                    };
                 buffer.push_str(&chunk);
                 last_output_time = Instant::now();
 
                 // Some Windows ConPTY-backed shells issue an ANSI Device
                 // Status Report request and wait for a terminal cursor
                 // position response before processing scripted input.
-                if chunk.contains("\x1b[6n") {
+                if !cursor_request_handled && chunk.contains("\x1b[6n") {
                     let _ = write!(writer, "\x1b[1;1R");
                     let _ = writer.flush();
                 }

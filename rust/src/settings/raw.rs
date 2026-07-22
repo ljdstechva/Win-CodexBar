@@ -155,6 +155,8 @@ pub(super) struct RawSettings {
     float_bar_show_cost: bool,
     #[serde(default)]
     promote_tray_icon: bool,
+    #[serde(default = "default_true")]
+    float_bar_show_account: bool,
 }
 
 impl Default for RawSettings {
@@ -246,6 +248,7 @@ impl Default for RawSettings {
             float_bar_show_reset_inline: s.float_bar_show_reset_inline,
             float_bar_show_cost: s.float_bar_show_cost,
             promote_tray_icon: s.promote_tray_icon,
+            float_bar_show_account: s.float_bar_show_account,
         }
     }
 }
@@ -520,6 +523,7 @@ impl From<RawSettings> for Settings {
             float_bar_show_reset_inline: raw.float_bar_show_reset_inline,
             float_bar_show_cost: raw.float_bar_show_cost,
             promote_tray_icon: raw.promote_tray_icon,
+            float_bar_show_account: raw.float_bar_show_account,
         }
     }
 }

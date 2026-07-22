@@ -272,6 +272,7 @@ impl TokenAccountSupport {
             }),
             // These providers don't support token accounts
             ProviderId::Codex
+            | ProviderId::ChatGPT
             | ProviderId::Gemini
             | ProviderId::Antigravity
             | ProviderId::Kiro

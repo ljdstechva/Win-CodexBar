@@ -201,8 +201,8 @@ pub struct Settings {
     #[serde(default = "default_window_scale_percent")]
     pub window_scale_percent: u16,
 
-    /// Tray flyout display scale, in the inclusive range 100..=200.
-    /// 100 % is normal size; higher values enlarge the flyout content.
+    /// Tray flyout display scale, in the inclusive range 75..=200.
+    /// 100 % is normal size; lower and higher values resize the flyout content.
     #[serde(default = "default_tray_scale_percent")]
     pub tray_scale_percent: u16,
 
@@ -257,6 +257,10 @@ pub struct Settings {
     /// Only has effect on Windows 11 (build ≥ 22000); silently ignored elsewhere.
     #[serde(default)]
     pub promote_tray_icon: bool,
+
+    /// When true, show provider plan and genuine subscription-expiry data.
+    #[serde(default = "default_true")]
+    pub float_bar_show_account: bool,
 }
 
 fn default_window_scale_percent() -> u16 {
@@ -272,7 +276,7 @@ fn default_tray_scale_percent() -> u16 {
 }
 
 pub fn clamp_tray_scale_percent(value: u16) -> u16 {
-    value.clamp(100, 200)
+    value.clamp(75, 200)
 }
 
 fn default_float_bar_opacity() -> u8 {
@@ -408,7 +412,7 @@ impl Default for Settings {
             switcher_shows_icons: true,
             menu_bar_shows_highest_usage: false,
             menu_bar_shows_percent: false,
-            show_as_used: true,        // Show as "used" by default
+            show_as_used: false,       // Show remaining capacity by default
             enable_animations: true,   // Animations enabled by default
             reset_time_relative: true, // Show relative times by default
             show_reset_when_exhausted: false,
@@ -448,6 +452,7 @@ impl Default for Settings {
             float_bar_show_reset_inline: false,
             float_bar_show_cost: false,
             promote_tray_icon: false,
+            float_bar_show_account: true,
         }
     }
 }
@@ -517,6 +522,21 @@ impl Settings {
         format!("\"{}\"", exe_path.display())
     }
 
+    fn can_manage_start_at_login(current_exe: &std::path::Path) -> bool {
+        let Some(file_name) = current_exe.file_name().and_then(|name| name.to_str()) else {
+            return false;
+        };
+
+        [
+            "codexbar.exe",
+            "codexbar-cli.exe",
+            "codexbar-desktop.exe",
+            "codexbar-desktop-tauri.exe",
+        ]
+        .iter()
+        .any(|candidate| file_name.eq_ignore_ascii_case(candidate))
+    }
+
     fn start_at_login_command_needs_repair(existing: &str, current_exe: &std::path::Path) -> bool {
         existing != Self::start_at_login_command(current_exe)
     }
@@ -534,6 +554,10 @@ impl Settings {
 
         if enabled {
             let exe_path = std::env::current_exe()?;
+            anyhow::ensure!(
+                Self::can_manage_start_at_login(&exe_path),
+                "Refusing to register an unrecognized CodexBar executable for start at login"
+            );
             let command = Self::start_at_login_command(&exe_path);
             run_key.set_value("CodexBar", &command)?;
         } else {
@@ -561,7 +585,10 @@ impl Settings {
         };
 
         match std::env::current_exe() {
-            Ok(exe_path) if Self::start_at_login_command_needs_repair(&existing, &exe_path) => {
+            Ok(exe_path)
+                if Self::can_manage_start_at_login(&exe_path)
+                    && Self::start_at_login_command_needs_repair(&existing, &exe_path) =>
+            {
                 let command = Self::start_at_login_command(&exe_path);
                 if let Err(error) = run_key.set_value("CodexBar", &command) {
                     tracing::warn!("Failed to repair CodexBar start-at-login command: {error}");
@@ -703,12 +730,23 @@ impl Settings {
         self.provider_configs.entry(id).or_default()
     }
 
-    /// Cookie source for `id`, or the default `"manual"` if unset.
+    /// Cookie source for `id`, or its provider-specific default if unset.
+    ///
+    /// ChatGPT is disabled by default. Enabling that account-only provider or
+    /// enabling FloatBar account display is the user's opt-in to reading the
+    /// matching authenticated account for non-personal plan/expiry enrichment.
+    /// Other cookie providers keep the conservative manual-cookie default.
     pub fn cookie_source(&self, id: ProviderId) -> &str {
         self.provider_configs
             .get(&id)
             .and_then(|c| c.cookie_source.as_deref())
-            .unwrap_or(DEFAULT_COOKIE_SOURCE)
+            .unwrap_or_else(|| {
+                if id == ProviderId::ChatGPT {
+                    "auto"
+                } else {
+                    DEFAULT_COOKIE_SOURCE
+                }
+            })
     }
 
     pub fn set_cookie_source(&mut self, id: ProviderId, source: impl Into<String>) {

@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-14T14:39:51.5425312Z",
+  "title": "Design System: Win-CodexBar",
+  "extensions": {
+    "colorMeta": {
+      "app-bg": {
+        "role": "neutral",
+        "displayName": "Charcoal App",
+        "canonical": "#1c1c1e",
+        "tonalRamp": ["#101012", "#151517", "#1c1c1e", "#2c2c2e", "#48484a", "#636366", "#8e8e93", "#f5f5f7"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "System Blue",
+        "canonical": "#0a84ff",
+        "tonalRamp": ["#00152e", "#002b5c", "#004b9a", "#0a84ff", "#3c9cff", "#72b7ff", "#acd6ff", "#e6f3ff"]
+      },
+      "floatbar-surface": {
+        "role": "neutral",
+        "displayName": "FloatBar Navy",
+        "canonical": "#0f172a",
+        "tonalRamp": ["#050811", "#080d1c", "#0f172a", "#1e293b", "#334155", "#475569", "#94a3b8", "#f8fafc"]
+      },
+      "quota-green": {
+        "role": "tertiary",
+        "displayName": "Capacity Green",
+        "canonical": "#4ade80",
+        "tonalRamp": ["#052e16", "#14532d", "#166534", "#15803d", "#22c55e", "#4ade80", "#86efac", "#dcfce7"]
+      },
+      "quota-yellow": {
+        "role": "tertiary",
+        "displayName": "Capacity Yellow",
+        "canonical": "#fde047",
+        "tonalRamp": ["#422006", "#713f12", "#854d0e", "#a16207", "#ca8a04", "#eab308", "#fde047", "#fef9c3"]
+      },
+      "quota-orange": {
+        "role": "tertiary",
+        "displayName": "Capacity Orange",
+        "canonical": "#fb923c",
+        "tonalRamp": ["#431407", "#7c2d12", "#9a3412", "#c2410c", "#ea580c", "#f97316", "#fb923c", "#ffedd5"]
+      },
+      "quota-red": {
+        "role": "tertiary",
+        "displayName": "Capacity Red",
+        "canonical": "#f87171",
+        "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fee2e2"]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "System UI Body",
+        "purpose": "Normal tray, settings, and explanatory copy."
+      },
+      "label": {
+        "displayName": "Compact Label",
+        "purpose": "FloatBar windows, metadata, and state labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "panel-ambient",
+        "value": "0 8px 32px rgba(0, 0, 0, 0.4)",
+        "purpose": "Separate tray and settings surfaces from the desktop."
+      },
+      {
+        "name": "floatbar-lift",
+        "value": "0 2px 5px rgba(0, 0, 0, 0.42)",
+        "purpose": "Keep the passive overlay readable over arbitrary content."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fade",
+        "value": "opacity 120ms ease",
+        "purpose": "Fade the click-through FloatBar to 10% opacity without moving layout."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce",
+        "purpose": "Remove non-essential transitions when requested by the OS."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "FloatBar Pill",
+      "kind": "custom",
+      "refersTo": "floatbar-pill",
+      "description": "Remaining 5h and 7d capacity for one provider, with optional localized reset text.",
+      "html": "<div class=\"ds-floatbar\" aria-label=\"Provider capacity\"><span class=\"ds-floatbar-icon\" aria-hidden=\"true\"></span><span class=\"ds-floatbar-values\"><span><b>5h</b> <strong class=\"ds-quota-green\">61%</strong></span><span><b>7d</b> <strong class=\"ds-quota-green\">71%</strong></span></span></div>",
+      "css": ".ds-floatbar { display: inline-flex; align-items: center; gap: 3px; min-height: 16px; padding: 1px 5px; border: 1px solid rgba(148, 163, 184, 0.52); border-radius: 999px; background: rgba(15, 23, 42, 0.94); color: #f8fafc; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 5px rgba(0,0,0,0.42); font: 600 10px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; user-select: none; transition: opacity 120ms ease; } .ds-floatbar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-floatbar-values { display: inline-flex; flex-direction: column; gap: 2px; text-align: right; } .ds-floatbar b { color: #e2e8f0; font-size: 0.78em; } .ds-quota-green { color: #4ade80; } @media (prefers-reduced-motion: reduce) { .ds-floatbar { transition: none; } }"
+    },
+    {
+      "name": "Settings Tab",
+      "kind": "nav",
+      "refersTo": "settings-tab-active",
+      "description": "Keyboard-safe segmented navigation for the five settings surfaces.",
+      "html": "<button class=\"ds-settings-tab\" aria-selected=\"true\">Display</button>",
+      "css": ".ds-settings-tab { border: 0; border-radius: 5px; padding: 5px 12px; background: rgba(255,255,255,0.10); color: var(--text-primary); font: 600 12px/1.3 system-ui, sans-serif; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: background 150ms ease, color 150ms ease; } .ds-settings-tab:hover { color: var(--text-primary); } .ds-settings-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Elevated graphite container for tray details and settings groups.",
+      "html": "<section class=\"ds-panel\"><h2>Provider</h2><p>Remaining capacity and reset timing.</p></section>",
+      "css": ".ds-panel { border: 1px solid var(--panel-border); border-radius: 12px; padding: 16px; background: var(--panel-bg); color: var(--text-primary); box-shadow: var(--panel-shadow); } .ds-panel h2 { margin: 0 0 14px; font: 600 13px/1.3 system-ui, sans-serif; } .ds-panel p { margin: 0; color: var(--text-secondary); font: 400 13px/1.3 system-ui, sans-serif; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "ghost-button",
+      "description": "Low-emphasis provider action used where a control should not compete with usage data.",
+      "html": "<button class=\"ds-ghost-button\">Refresh</button>",
+      "css": ".ds-ghost-button { border: 1px solid var(--provider-icon-ring); border-radius: 6px; padding: 6px 10px; background: var(--provider-row-bg); color: var(--provider-row-text-primary); font: 500 11px/1.3 system-ui, sans-serif; cursor: pointer; transition: background 120ms ease; } .ds-ghost-button:hover:not(:disabled) { background: var(--provider-row-bg-hover); } .ds-ghost-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-ghost-button:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "panel",
+      "description": "Compact settings field with an explicit keyboard focus state.",
+      "html": "<input class=\"ds-text-input\" type=\"text\" aria-label=\"Provider name\" placeholder=\"Provider name\" />",
+      "css": ".ds-text-input { width: 160px; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; padding: 6px 10px; background: rgba(255,255,255,0.06); color: var(--text-primary); font: 400 13px/1.3 system-ui, sans-serif; } .ds-text-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } .ds-text-input::placeholder { color: var(--text-muted); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Instrument",
+    "overview": "Win-CodexBar is a compact, native-feeling instrument for an active developer workstation. It should be understood at a glance, then recede: capacity, reset timing, and pace are the signal; configuration and diagnostics stay one deliberate step deeper.",
+    "keyCharacteristics": [
+      "Glance-first hierarchy with remaining capacity before configuration.",
+      "Cool charcoal surfaces with one blue action accent.",
+      "Green/yellow/orange/red reserved for explicit quota and pace states.",
+      "Native, no-activate behavior for tray and FloatBar surfaces."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Use color to expose an existing state, never to decorate a neutral row.",
+        "section": "colors"
+      },
+      {
+        "name": "The Stable Numbers Rule",
+        "body": "Usage, pace, reset time, and thresholds use tabular numerals so changing values do not make neighboring labels jump.",
+        "section": "typography"
+      },
+      {
+        "name": "The Quiet Elevation Rule",
+        "body": "Shadows separate a surface from its context; they never become the visual subject.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep remaining capacity, reset timing, and pace above decorative or cost information.",
+      "Do preserve truthful 5h and 7d labels based on actual provider window duration.",
+      "Do keep focus visible, keyboard navigation intact, localization-safe, and reduced-motion friendly."
+    ],
+    "donts": [
+      "Don't become a dashboard maze that requires opening a full web page for a glanceable status.",
+      "Don't lead with cost estimates, decorative analytics, or model attribution when the user is asking about capacity.",
+      "Don't use playful decoration, gratuitous motion, oversized cards, or fashionable visual effects that compete with coding work.",
+      "Don't hide provider ambiguity behind fabricated percentages, mislabeled windows, or color-only meaning."
+    ]
+  }
+}

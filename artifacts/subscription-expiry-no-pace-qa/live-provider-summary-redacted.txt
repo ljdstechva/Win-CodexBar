@@ -1,0 +1,29 @@
+[
+  {
+    "providerId": "codex",
+    "displayName": "Codex",
+    "planName": "ChatGPT Pro",
+    "subscriptionEndsAt": null,
+    "sourceLabel": "oauth",
+    "accountOnly": false,
+    "errorPresent": false
+  },
+  {
+    "providerId": "chatgpt",
+    "displayName": "ChatGPT",
+    "planName": "ChatGPT Pro",
+    "subscriptionEndsAt": "2026-07-23T01:52:39Z",
+    "sourceLabel": "oauth",
+    "accountOnly": true,
+    "errorPresent": false
+  },
+  {
+    "providerId": "claude",
+    "displayName": "Claude",
+    "planName": "Claude Max 5x",
+    "subscriptionEndsAt": "2026-08-18T04:29:10Z",
+    "sourceLabel": "oauth",
+    "accountOnly": false,
+    "errorPresent": false
+  }
+]

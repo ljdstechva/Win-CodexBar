@@ -396,20 +396,21 @@ impl KimiProvider {
         }
 
         if let Some(subscription) = subscription {
-            if let Some(balance) = subscription.subscription_balance
-                && let Some(ratio) =
+            if let Some(balance) = subscription.subscription_balance {
+                let subscription_ends_at =
+                    balance.expire_time.as_ref().and_then(parse_kimi_timestamp);
+                if let Some(ends_at) = subscription_ends_at {
+                    usage = usage.with_subscription_ends_at(ends_at);
+                }
+                if let Some(ratio) =
                     value_as_f64(balance.amount_used_ratio.as_ref()).filter(|v| v.is_finite())
-            {
-                usage = usage.with_extra_rate_window(
-                    "kimi-monthly",
-                    "Monthly",
-                    RateWindow::with_details(
-                        ratio * 100.0,
-                        None,
-                        balance.expire_time.as_ref().and_then(parse_kimi_timestamp),
-                        None,
-                    ),
-                );
+                {
+                    usage = usage.with_extra_rate_window(
+                        "kimi-monthly",
+                        "Monthly",
+                        RateWindow::with_details(ratio * 100.0, None, subscription_ends_at, None),
+                    );
+                }
             }
 
             if let Some(limit) = subscription.ratelimit_code7d
@@ -977,6 +978,12 @@ mod tests {
             .unwrap();
         assert_eq!(monthly.title, "Monthly");
         assert!((monthly.window.used_percent - 77.16).abs() < 0.0001);
+        assert_eq!(
+            snapshot.subscription_ends_at,
+            DateTime::parse_from_rfc3339("2026-07-23T00:00:00Z")
+                .ok()
+                .map(|value| value.with_timezone(&Utc))
+        );
         let code_7d = snapshot
             .extra_rate_windows
             .iter()

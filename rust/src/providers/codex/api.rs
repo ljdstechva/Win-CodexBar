@@ -154,6 +154,22 @@ impl CodexApi {
         Ok(credentials)
     }
 
+    /// Return the opaque Codex OAuth session needed to enrich the matching
+    /// ChatGPT account. The values stay in memory and this type deliberately
+    /// implements neither `Debug` nor serialization.
+    pub(crate) fn load_chatgpt_session(
+        &self,
+    ) -> Result<Option<CodexChatGptSession>, ProviderError> {
+        let credentials = self.load_credentials()?;
+        let Some(account_id) = credentials.account_id else {
+            return Ok(None);
+        };
+        Ok(Some(CodexChatGptSession {
+            access_token: credentials.access_token,
+            account_id,
+        }))
+    }
+
     fn parse_credentials_json(content: &str) -> Result<CodexCredentials, ProviderError> {
         let json: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| ProviderError::Parse(format!("Invalid Codex credentials JSON: {}", e)))?;
@@ -338,14 +354,17 @@ impl CodexApi {
         if let Some(rate_limit) = json.get("rate_limit") {
             let primary_opt = rate_limit
                 .get("primary_window")
+                .filter(|window| !window.is_null())
                 .map(|w| self.parse_window(w));
 
             let secondary_opt = rate_limit
                 .get("secondary_window")
+                .filter(|window| !window.is_null())
                 .map(|w| self.parse_window(w));
 
             let code_review = rate_limit
                 .get("code_review_window")
+                .filter(|window| !window.is_null())
                 .map(|w| self.parse_window(w));
 
             // If primary is missing, promote secondary to primary (weekly-only plans)
@@ -363,8 +382,14 @@ impl CodexApi {
             && let Some(first) = rate_limits.first()
         {
             let primary = self.parse_window(first);
-            let secondary = rate_limits.get(1).map(|w| self.parse_window(w));
-            let code_review = rate_limits.get(2).map(|w| self.parse_window(w));
+            let secondary = rate_limits
+                .get(1)
+                .filter(|window| !window.is_null())
+                .map(|w| self.parse_window(w));
+            let code_review = rate_limits
+                .get(2)
+                .filter(|window| !window.is_null())
+                .map(|w| self.parse_window(w));
             return (primary, secondary, code_review);
         }
 
@@ -605,6 +630,11 @@ impl Default for CodexApi {
 }
 
 // --- Data structures ---
+
+pub(crate) struct CodexChatGptSession {
+    pub(crate) access_token: String,
+    pub(crate) account_id: String,
+}
 
 #[derive(Clone)]
 struct CodexCredentials {
@@ -925,6 +955,8 @@ mod tests {
         assert_eq!(usage.extra_rate_windows[1].id, "codex-spark-weekly");
         assert_eq!(usage.extra_rate_windows[1].title, "Codex Spark Weekly");
         assert_eq!(usage.extra_rate_windows[1].window.used_percent, 62.0);
+        assert_eq!(usage.login_method.as_deref(), Some("ChatGPT Pro"));
+        assert_eq!(usage.subscription_ends_at, None);
     }
 
     #[test]
@@ -946,6 +978,28 @@ mod tests {
             .expect("codex usage");
 
         assert!(usage.extra_rate_windows.is_empty());
+    }
+
+    #[test]
+    fn ignores_null_secondary_window_in_flexible_json_shape() {
+        let api = CodexApi::new();
+        let (usage, _) = api
+            .build_result_from_json(&json!({
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 10,
+                        "limit_window_seconds": 604800
+                    },
+                    "secondary_window": null,
+                    "code_review_window": null
+                }
+            }))
+            .expect("codex usage");
+
+        assert_eq!(usage.primary.used_percent, 10.0);
+        assert_eq!(usage.primary.window_minutes, Some(10080));
+        assert!(usage.secondary.is_none());
+        assert!(usage.model_specific.is_none());
     }
 
     #[test]

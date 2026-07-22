@@ -1,0 +1,72 @@
+Win-CodexBar subscription-expiry/no-Pace installed QA
+Verified: 2026-07-22 16:07:24 +08:00 (Asia/Singapore)
+
+Release artifact:
+  D:\02 systems\01 codex\Win-CodexBar\target\release\codexbar-desktop-tauri.exe
+  SHA-256: B5B74CA7264B1A4853A3048B44E56BAD60C01DAA4DF8FBED7CB06DD54AB63432
+
+Installed executable:
+  C:\Users\USER\AppData\Local\Programs\CodexBar\codexbar.exe
+  SHA-256: B5B74CA7264B1A4853A3048B44E56BAD60C01DAA4DF8FBED7CB06DD54AB63432
+  Hash matches release: yes
+  Final installed PID: 37616
+  Startup health check: remained running
+
+Settings restoration:
+  C:\Users\USER\AppData\Roaming\CodexBar\settings.json
+  Pre-QA SHA-256: 24E8C85B8A08916AC38A9A0B2A044C37B129CC8DF8C33446AC3DE1DC6362524A
+  Final SHA-256: 24E8C85B8A08916AC38A9A0B2A044C37B129CC8DF8C33446AC3DE1DC6362524A
+  Restored byte-for-byte after final relaunch: yes
+  FloatBar geometry restored to 1053,680 with a 205 x 211 intrinsic vertical size
+  Rollback backup: C:\Users\USER\.codex\scratch\Win-CodexBar-subscription-rollback-20260722-160257
+
+Authenticated provider verification:
+  ChatGPT live entitlement test: passed
+  Matched account-only plan: ChatGPT Pro
+  Future entitlement: 2026-07-23T01:52:39Z
+  Claude live subscription test: passed
+  Claude live direct-Web same-organization test: passed
+  Matched exact-organization plan: Claude Max 5x
+  Genuine future billing boundary: 2026-08-18T04:29:10Z
+  Claude source: authenticated Claude desktop session plus typed billing/bootstrap responses
+  Token/JWT/quota reset timestamps are not accepted as subscription expiry
+  Conflicting global tier and multi-organization regression: passed
+
+Installed visual proof:
+  Vertical: 205 x 211 pixels; four complete capacity/account entries; no Pace pill
+  Vertical SHA-256: 7AE9ECEEFFAE41C80CC70DC25CB550E5AB8716F7688A0FEA6678073DF2961E9C
+  Horizontal: 747 x 60 pixels; four complete capacity/account entries; no clipping and no Pace pill
+  Horizontal SHA-256: 048592A70902051CFAF10F7886A74B7D343A765AF81435A30E27AAA054871A2A
+  ChatGPT account pill: ChatGPT Pro with a genuine future countdown
+  Claude account pill: Claude Max 5x with a genuine future countdown
+  ChatGPT uses the same teal Codex SVG and brand color while retaining separate account-only ownership
+  Accessibility tooltips expose the localized absolute subscription dates
+  Exactly one ChatGPT account pill is rendered
+  Capacity values, reset times, and Claude FA remain visible
+  No signed Pace percentage appears on the FloatBar
+  No clipping, overlap, excessive gap, or leftover Pace space is visible
+
+Native window verification:
+  Installed-process target matched exactly
+  WS_EX_TOPMOST: true
+  WS_EX_NOACTIVATE: true
+  WS_EX_TRANSPARENT (click-through): true
+  Watchdog restored topmost after a deliberate no-activate demotion
+  Foreground returned to Codex and remained unchanged during the delayed watchdog check
+  Neutral screenshot backdrops and all temporary QA helpers were removed
+  Claude desktop remains closed, matching its pre-QA state
+
+Verification commands:
+  cargo fmt --all: passed on both Rust manifests
+  cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings: passed
+  cargo clippy --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --all-targets -- -D warnings: passed
+  cargo test --manifest-path rust/Cargo.toml: 623 passed, 5 ignored; CLI 1 passed
+  cargo test --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml: 339 passed
+  pnpm test -- src/components/providers/providerIcons.test.ts src/floatbar: 50 passed
+  pnpm test: 224 passed
+  pnpm run build: passed
+  pnpm run check-locale: 611 keys matched
+  pnpm run tauri:build: passed
+  live_chatgpt_scrape_has_future_subscription_end --ignored: passed
+  live_claude_subscription_end --ignored: passed
+  live_web_snapshot_uses_active_organization_plan_and_billing_boundary --ignored: passed

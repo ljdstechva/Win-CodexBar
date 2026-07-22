@@ -6,93 +6,19 @@ const tauriMocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
 }));
 
-const updateMocks = vi.hoisted(() => ({
-  checkNow: vi.fn(),
-  download: vi.fn(),
-  apply: vi.fn(),
-  dismiss: vi.fn(),
-  openRelease: vi.fn(),
-}));
-
 vi.mock("../../../lib/tauri", () => tauriMocks);
 vi.mock("../../../hooks/useLocale", () => ({
   useLocale: () => ({ t: (key: string) => key }),
 }));
-vi.mock("../../../hooks/useUpdateState", () => ({
-  useUpdateState: () => ({
-    updateState: {
-      status: "idle",
-      version: null,
-      error: null,
-      progress: null,
-      releaseUrl: null,
-      canDownload: false,
-      canApply: false,
-      lastCheckedAt: null,
-    },
-    ...updateMocks,
-  }),
-}));
 
 import AboutTab from "./AboutTab";
-import type { SettingsSnapshot } from "../../../types/bridge";
-
-const settings: SettingsSnapshot = {
-  enabledProviders: [],
-  refreshIntervalSecs: 300,
-    adaptiveRefresh: false,
-  refreshAllProvidersOnMenuOpen: false,
-  startAtLogin: false,
-  startMinimized: false,
-  showNotifications: true,
-  soundEnabled: true,
-  soundVolume: 100,
-  highUsageThreshold: 70,
-  criticalUsageThreshold: 90,
-  predictivePaceWarningEnabled: false,
-  trayIconMode: "single",
-  switcherShowsIcons: true,
-  menuBarShowsHighestUsage: true,
-  menuBarShowsPercent: true,
-  showAsUsed: false,
-  showAllTokenAccountsInMenu: true,
-  enableAnimations: true,
-  resetTimeRelative: true,
-  showResetWhenExhausted: false,
-  menuBarDisplayMode: "compact",
-  hidePersonalInfo: false,
-  autoDownloadUpdates: false,
-  installUpdatesOnQuit: false,
-  globalShortcut: "",
-  codexCustomSessionsDirs: [],
-  updateChannel: "stable",
-  uiLanguage: "english",
-  theme: "dark",
-  windowScalePercent: 125,
-  trayScalePercent: 100,
-  powertoysStatusPipeEnabled: false,
-  claudeAvoidKeychainPrompts: true,
-  codexSparkUsageVisible: true,
-  disableKeychainAccess: false,
-  providerMetrics: {},
-  floatBarEnabled: false,
-  floatBarOpacity: 0.9,
-  floatBarScale: 100,
-  floatBarOrientation: "horizontal",
-  floatBarStyle: "floating",
-  floatBarClickThrough: false,
-  floatBarProviderIds: [],
-  floatBarDarkText: false,
-  floatBarShowResetInline: false,
-  floatBarShowCost: false,
-};
 
 describe("AboutTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tauriMocks.getAppInfo.mockResolvedValue({
       name: "CodexBar",
-      version: "0.30.3",
+      version: "0.42.0",
       buildNumber: "dev",
       updateChannel: "stable",
       tagline: "Keep agent limits in view.",
@@ -100,34 +26,26 @@ describe("AboutTab", () => {
     tauriMocks.openExternalUrl.mockResolvedValue(undefined);
   });
 
-  it("opens about links through the Tauri URL bridge", async () => {
-    render(<AboutTab settings={settings} set={vi.fn()} saving={false} />);
+  it("replaces updater controls with the original repository link", async () => {
+    render(<AboutTab settings={{} as never} set={vi.fn()} saving={false} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "AboutLinkGitHub" }));
-    fireEvent.click(screen.getByRole("button", { name: "AboutLinkWebsite" }));
-    fireEvent.click(screen.getByRole("button", { name: "AboutLinkOriginalProject" }));
+    const watchLink = await screen.findByRole("button", {
+      name: "Watch steipete/CodexBar on GitHub",
+    });
+    expect(screen.queryByRole("button", { name: /check for updates/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^download$/i })).toBeNull();
+    fireEvent.click(watchLink);
 
-    expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
-      1,
-      "https://github.com/Finesssee/Win-CodexBar",
-    );
-    expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
-      2,
-      "https://codexbar.app",
-    );
-    expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
-      3,
+    expect(tauriMocks.openExternalUrl).toHaveBeenCalledWith(
       "https://github.com/steipete/CodexBar",
     );
   });
 
   it("shows a link error if the OS browser launch fails", async () => {
     tauriMocks.openExternalUrl.mockRejectedValue("no browser");
-
-    render(<AboutTab settings={settings} set={vi.fn()} saving={false} />);
+    render(<AboutTab settings={{} as never} set={vi.fn()} saving={false} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "AboutLinkWebsite" }));
-
     await waitFor(() => {
       expect(screen.getByText("ErrorPrefix no browser")).toBeInTheDocument();
     });

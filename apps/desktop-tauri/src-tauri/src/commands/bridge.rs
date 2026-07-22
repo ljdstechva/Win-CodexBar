@@ -50,6 +50,16 @@ impl RateWindowSnapshot {
     }
 }
 
+const WEEKLY_WINDOW_MINUTES: u32 = 7 * 24 * 60;
+
+fn is_weekly_window_minutes(window_minutes: Option<u32>) -> bool {
+    window_minutes.is_some_and(|minutes| minutes >= WEEKLY_WINDOW_MINUTES)
+}
+
+pub(crate) fn is_weekly_rate_window_snapshot(window: &RateWindowSnapshot) -> bool {
+    is_weekly_window_minutes(window.window_minutes)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CostSnapshotBridge {
@@ -83,6 +93,19 @@ pub struct PaceSnapshot {
     pub actual_used_percent: f64,
 }
 
+impl PaceSnapshot {
+    fn from_usage_pace(pace: &codexbar::core::UsagePace) -> Self {
+        Self {
+            stage: pace_stage_str(pace.stage),
+            delta_percent: pace.delta_percent,
+            will_last_to_reset: pace.will_last_to_reset,
+            eta_seconds: pace.eta_seconds,
+            expected_used_percent: pace.expected_used_percent,
+            actual_used_percent: pace.actual_used_percent,
+        }
+    }
+}
+
 /// A frontend-friendly snapshot of one provider's usage data.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +113,7 @@ pub struct ProviderUsageSnapshot {
     pub provider_id: String,
     pub display_name: String,
     pub primary: RateWindowSnapshot,
+    pub account_only: bool,
     pub primary_label: Option<String>,
     pub secondary: Option<RateWindowSnapshot>,
     pub secondary_label: Option<String>,
@@ -98,11 +122,13 @@ pub struct ProviderUsageSnapshot {
     pub extra_rate_windows: Vec<NamedRateWindowSnapshot>,
     pub cost: Option<CostSnapshotBridge>,
     pub plan_name: Option<String>,
+    pub subscription_ends_at: Option<String>,
     pub account_email: Option<String>,
     pub source_label: String,
     pub updated_at: String,
     pub error: Option<String>,
     pub pace: Option<PaceSnapshot>,
+    pub weekly_pace: Option<PaceSnapshot>,
     pub account_organization: Option<String>,
     pub tray_status_label: Option<String>,
     pub fetch_duration_ms: Option<u128>,
@@ -141,22 +167,15 @@ impl ProviderUsageSnapshot {
     ) -> Self {
         let usage = &result.usage;
 
-        let primary_pace = codexbar::core::UsagePace::weekly(&usage.primary, None, 10080);
-
-        let pace = primary_pace.as_ref().map(|p| PaceSnapshot {
-            stage: pace_stage_str(p.stage),
-            delta_percent: p.delta_percent,
-            will_last_to_reset: p.will_last_to_reset,
-            eta_seconds: p.eta_seconds,
-            expected_used_percent: p.expected_used_percent,
-            actual_used_percent: p.actual_used_percent,
-        });
+        let primary_pace = codexbar::core::UsagePace::for_window(&usage.primary, None, 300);
+        let pace = primary_pace.as_ref().map(PaceSnapshot::from_usage_pace);
 
         // Compute pace for secondary window (weekly) to derive reserve info
         let secondary_pace = usage
             .secondary
             .as_ref()
-            .and_then(|sw| codexbar::core::UsagePace::weekly(sw, None, 10080));
+            .and_then(|sw| codexbar::core::UsagePace::for_window(sw, None, 10080));
+        let weekly_pace = secondary_pace.as_ref().map(PaceSnapshot::from_usage_pace);
 
         let primary_snap = RateWindowSnapshot::from_rate_window(&usage.primary);
 
@@ -172,12 +191,27 @@ impl ProviderUsageSnapshot {
             provider_id: id.cli_name().to_string(),
             display_name: id.display_name().to_string(),
             primary: primary_snap,
-            primary_label: Some(metadata.session_label.to_string()),
+            account_only: usage.account_only,
+            primary_label: Some(
+                if is_weekly_window_minutes(usage.primary.window_minutes) {
+                    metadata.weekly_label
+                } else {
+                    metadata.session_label
+                }
+                .to_string(),
+            ),
             secondary: secondary_snap,
-            secondary_label: usage
-                .secondary
-                .as_ref()
-                .map(|_| metadata.weekly_label.to_string()),
+            secondary_label: usage.secondary.as_ref().map(|secondary| {
+                match secondary.window_minutes {
+                    Some(minutes) if minutes >= WEEKLY_WINDOW_MINUTES => metadata.weekly_label,
+                    Some(_) => metadata.session_label,
+                    // Preserve the established positional meaning when an
+                    // older provider omits duration metadata. An explicit
+                    // duration remains authoritative when it is available.
+                    None => metadata.weekly_label,
+                }
+                .to_string()
+            }),
             model_specific: usage
                 .model_specific
                 .as_ref()
@@ -206,11 +240,13 @@ impl ProviderUsageSnapshot {
                 formatted_limit: c.format_limit(),
             }),
             plan_name: usage.login_method.clone(),
+            subscription_ends_at: usage.subscription_ends_at.map(|value| value.to_rfc3339()),
             account_email: usage.account_email.clone(),
             source_label: result.source_label.clone(),
             updated_at: usage.updated_at.to_rfc3339(),
             error: None,
             pace,
+            weekly_pace,
             account_organization: usage.account_organization.clone(),
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -236,6 +272,7 @@ impl ProviderUsageSnapshot {
                 reserve_will_last_to_reset: false,
                 reserve_eta_seconds: None,
             },
+            account_only: id == ProviderId::ChatGPT,
             primary_label: Some(metadata.session_label.to_string()),
             secondary: None,
             secondary_label: None,
@@ -244,11 +281,13 @@ impl ProviderUsageSnapshot {
             extra_rate_windows: Vec::new(),
             cost: None,
             plan_name: None,
+            subscription_ends_at: None,
             account_email: None,
             source_label: String::new(),
             updated_at: chrono::Utc::now().to_rfc3339(),
             error: Some(error),
             pace: None,
+            weekly_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -464,6 +503,7 @@ pub struct SettingsSnapshot {
     float_bar_show_reset_inline: bool,
     float_bar_show_cost: bool,
     promote_tray_icon: bool,
+    float_bar_show_account: bool,
 }
 
 #[tauri::command]
@@ -564,6 +604,7 @@ impl From<Settings> for SettingsSnapshot {
             float_bar_show_reset_inline: settings.float_bar_show_reset_inline,
             float_bar_show_cost: settings.float_bar_show_cost,
             promote_tray_icon: settings.promote_tray_icon,
+            float_bar_show_account: settings.float_bar_show_account,
         }
     }
 }
@@ -574,10 +615,7 @@ pub(crate) fn provider_catalog_for(settings: &Settings) -> Vec<ProviderCatalogEn
         .provider_display_order()
         .into_iter()
         .filter(|provider| {
-            !provider.is_deprecated()
-                || settings
-                    .enabled_providers
-                    .contains(provider.cli_name())
+            !provider.is_deprecated() || settings.enabled_providers.contains(provider.cli_name())
         })
         .map(|provider| ProviderCatalogEntry {
             id: provider.cli_name().to_string(),

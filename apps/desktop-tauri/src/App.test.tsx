@@ -18,8 +18,6 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
 const tauriMocks = vi.hoisted(() => ({
   getBootstrapState: vi.fn(),
   getSettingsSnapshot: vi.fn(),
-  checkForUpdates: vi.fn(),
-  downloadUpdate: vi.fn(),
   setSurfaceMode: vi.fn(),
   getLocaleStrings: vi.fn(),
   setUiLanguage: vi.fn(),
@@ -110,6 +108,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarShowResetInline: false,
     floatBarShowCost: false,
+    floatBarShowAccount: true,
     ...overrides,
   };
 }
@@ -128,16 +127,6 @@ describe("App window-label routing", () => {
     webviewWindowMocks.label = "main";
     tauriMocks.getBootstrapState.mockResolvedValue(bootstrap());
     tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
-    tauriMocks.checkForUpdates.mockResolvedValue({
-      status: "idle",
-      version: null,
-      error: null,
-      progress: null,
-      releaseUrl: null,
-      canDownload: false,
-      canApply: false,
-      lastCheckedAt: null,
-    });
     tauriMocks.getLocaleStrings.mockResolvedValue(buildBundle());
     tauriMocks.getCurrentSurfaceState.mockResolvedValue({
       mode: "hidden",

@@ -188,6 +188,7 @@ mod tests {
             provider_id: "test-provider".to_string(),
             display_name: "Test Provider".to_string(),
             primary: rate_window(42.0),
+            account_only: false,
             primary_label: Some("Session".to_string()),
             secondary: None,
             secondary_label: None,
@@ -196,11 +197,13 @@ mod tests {
             extra_rate_windows: Vec::new(),
             cost: None,
             plan_name: Some("Team".to_string()),
+            subscription_ends_at: Some("2026-07-23T00:00:00Z".to_string()),
             account_email: Some("dev@example.com".to_string()),
             source_label: "web".to_string(),
             updated_at: "2026-07-09T00:00:00Z".to_string(),
             error: None,
             pace: None,
+            weekly_pace: None,
             account_organization: Some("Example Org".to_string()),
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -209,6 +212,7 @@ mod tests {
         let value = serde_json::to_value(snapshot).unwrap();
 
         assert!(value.get("planName").is_none());
+        assert!(value.get("subscriptionEndsAt").is_none());
         assert!(value.get("accountEmail").is_none());
     }
 
@@ -231,6 +235,7 @@ mod tests {
             provider_id: "test-provider".to_string(),
             display_name: "Test Provider".to_string(),
             primary: rate_window(42.0),
+            account_only: false,
             primary_label: Some("Session".to_string()),
             secondary: None,
             secondary_label: None,
@@ -239,11 +244,13 @@ mod tests {
             extra_rate_windows: Vec::new(),
             cost: None,
             plan_name: None,
+            subscription_ends_at: None,
             account_email: None,
             source_label: "web".to_string(),
             updated_at: "2026-07-09T00:00:00Z".to_string(),
             error: None,
             pace: None,
+            weekly_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,

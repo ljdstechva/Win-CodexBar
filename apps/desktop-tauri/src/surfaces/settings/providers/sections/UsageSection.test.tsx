@@ -70,14 +70,40 @@ describe("UsageSection", () => {
     eventMocks.listen.mockResolvedValue(() => {});
   });
 
-  it("renders extra Copilot budget windows in settings", async () => {
-    render(
+  it("renders extra Copilot budget windows as remaining capacity", async () => {
+    const { container } = render(
       <LocaleProvider>
-        <UsageSection provider={provider()} resetTimeRelative={true} t={(key) => key} />
+        <UsageSection
+          provider={provider()}
+          resetTimeRelative={true}
+          showAsUsed={false}
+          t={(key) => key}
+        />
       </LocaleProvider>,
     );
 
     expect(await screen.findByText("Additional Budget")).toBeInTheDocument();
-    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByText("80% PanelLeftSuffix")).toBeInTheDocument();
+    expect(screen.getByText("58% PanelLeftSuffix")).toBeInTheDocument();
+    expect(
+      Array.from(container.querySelectorAll<HTMLElement>(".provider-usage-bar__fill"))
+        .map((element) => element.style.width),
+    ).toEqual(["80%", "58%"]);
+  });
+
+  it("retains consumed-capacity rendering when explicitly requested", async () => {
+    render(
+      <LocaleProvider>
+        <UsageSection
+          provider={provider()}
+          resetTimeRelative={true}
+          showAsUsed
+          t={(key) => key}
+        />
+      </LocaleProvider>,
+    );
+
+    expect(await screen.findByText("20% PanelUsedSuffix")).toBeInTheDocument();
+    expect(screen.getByText("42% PanelUsedSuffix")).toBeInTheDocument();
   });
 });

@@ -150,11 +150,74 @@ fn capped_logical_size(window: &WebviewWindow, width: f64, height: f64) -> (f64,
 }
 
 /// Make the window visible and give it input focus.
+///
+/// Passive proof launches are the sole exception: the native no-activate
+/// style is applied before the show call and focus is intentionally skipped.
 pub fn show_window(window: &WebviewWindow) -> Result<(), String> {
     let map_err = |e: tauri::Error| e.to_string();
+    let passive_proof = crate::proof_harness::is_no_activate_proof_mode(window.app_handle());
+    if passive_proof {
+        apply_no_activate(window);
+    }
     window.show().map_err(map_err)?;
-    window.set_focus().map_err(map_err)?;
+    if !passive_proof {
+        window.set_focus().map_err(map_err)?;
+    }
     Ok(())
+}
+
+fn apply_no_activate(window: &WebviewWindow) {
+    let _ = window;
+    #[cfg(windows)]
+    {
+        use raw_window_handle::HasWindowHandle;
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return;
+        };
+        unsafe {
+            const GWL_EXSTYLE: i32 = -20;
+            const WS_EX_NOACTIVATE: isize = 0x08000000;
+            const SWP_NOSIZE: u32 = 0x0001;
+            const SWP_NOMOVE: u32 = 0x0002;
+            const SWP_NOZORDER: u32 = 0x0004;
+            const SWP_NOACTIVATE: u32 = 0x0010;
+            const SWP_FRAMECHANGED: u32 = 0x0020;
+
+            let hwnd = handle.hwnd.get();
+            let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if current & WS_EX_NOACTIVATE == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, current | WS_EX_NOACTIVATE);
+                SetWindowPos(
+                    hwnd,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
+    fn SetWindowLongPtrW(hwnd: isize, index: i32, new_style: isize) -> isize;
+    fn SetWindowPos(
+        hwnd: isize,
+        hwnd_insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
 }
 
 pub fn hide_to_tray(app: &AppHandle) -> Result<SurfaceMode, String> {

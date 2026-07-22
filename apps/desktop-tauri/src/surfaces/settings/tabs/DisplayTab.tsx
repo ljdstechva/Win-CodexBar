@@ -10,12 +10,7 @@ function clampWindowScalePercent(value: number): number {
   return Math.min(250, Math.max(100, Number.isFinite(value) ? value : 100));
 }
 
-export default function DisplayTab({
-  mode = "menu",
-  settings,
-  set,
-  saving,
-}: TabProps & { mode?: "menuBar" | "menu" }) {
+export default function DisplayTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
   const [windowScaleDraft, setWindowScaleDraft] = useState(() =>
     clampWindowScalePercent(settings.windowScalePercent),
@@ -41,7 +36,7 @@ export default function DisplayTab({
   return (
     <>
       {/* ── Menu bar ─────────────────────────────────────────────── */}
-      {mode === "menuBar" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">{t("MenuBar")}</h3>
         <div className="settings-section__group">
           <Field
@@ -124,10 +119,10 @@ export default function DisplayTab({
             />
           </Field>
         </div>
-      </section>}
+      </section>
 
       {/* ── Menu content ─────────────────────────────────────────── */}
-      {mode === "menu" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">{t("TabMenu")}</h3>
         <div className="settings-section__group">
           <Field
@@ -199,11 +194,9 @@ export default function DisplayTab({
             />
           </Field>
         </div>
-      </section>}
+      </section>
 
-      {mode === "menu" && (
-        <FloatBarSettingsSection settings={settings} saving={saving} set={set} />
-      )}
+      <FloatBarSettingsSection settings={settings} saving={saving} set={set} />
     </>
   );
 }

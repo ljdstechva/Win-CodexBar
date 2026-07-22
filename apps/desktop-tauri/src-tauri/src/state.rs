@@ -1,107 +1,10 @@
 use codexbar::core::ProviderId;
-use serde::Serialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use crate::commands::ProviderUsageSnapshot;
 use crate::proof_harness::ProofConfig;
 use crate::surface::{SurfaceMode, SurfaceStateMachine, SurfaceTransition};
 use crate::surface_target::SurfaceTarget;
-
-/// App-update lifecycle tracking.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum UpdateState {
-    #[default]
-    Idle,
-    Checking,
-    Available(String),
-    Downloading(f32),
-    Ready,
-    Error(String),
-}
-
-/// Serializable update-state payload for the frontend bridge.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateStatePayload {
-    pub status: &'static str,
-    pub version: Option<String>,
-    pub error: Option<String>,
-    pub progress: Option<f32>,
-    pub release_url: Option<String>,
-    pub can_download: bool,
-    pub can_apply: bool,
-    /// Unix-ms timestamp of the last completed update check (success or failure).
-    /// `None` means the app has never checked for updates during this session.
-    pub last_checked_at_ms: Option<i64>,
-}
-
-impl UpdateState {
-    pub fn to_payload(&self) -> UpdateStatePayload {
-        match self {
-            Self::Idle => UpdateStatePayload {
-                status: "idle",
-                version: None,
-                error: None,
-                progress: None,
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-            Self::Checking => UpdateStatePayload {
-                status: "checking",
-                version: None,
-                error: None,
-                progress: None,
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-            Self::Available(v) => UpdateStatePayload {
-                status: "available",
-                version: Some(v.clone()),
-                error: None,
-                progress: None,
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-            Self::Downloading(p) => UpdateStatePayload {
-                status: "downloading",
-                version: None,
-                error: None,
-                progress: Some(*p),
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-            Self::Ready => UpdateStatePayload {
-                status: "ready",
-                version: None,
-                error: None,
-                progress: None,
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-            Self::Error(e) => UpdateStatePayload {
-                status: "error",
-                version: None,
-                error: Some(e.clone()),
-                progress: None,
-                release_url: None,
-                can_download: false,
-                can_apply: false,
-                last_checked_at_ms: None,
-            },
-        }
-    }
-}
 
 /// Tray icon anchor in physical pixels, used for panel positioning.
 #[derive(Debug, Clone, Copy)]
@@ -127,13 +30,6 @@ pub struct AppState {
     /// refresh starts or enablement changes so superseded results are ignored.
     pub provider_refresh_generation: u64,
     pub is_refreshing: bool,
-    pub update_state: UpdateState,
-    /// Full update metadata from the last successful check.
-    pub update_info: Option<codexbar::updater::UpdateInfo>,
-    /// Unix-ms timestamp of the last completed update check.
-    pub last_update_check_ms: Option<i64>,
-    /// Path to a downloaded installer ready to apply.
-    pub installer_path: Option<PathBuf>,
     /// Proof-harness configuration (set when `CODEXBAR_PROOF_MODE` is active).
     pub proof_config: Option<ProofConfig>,
     /// Persistent notification manager — tracks which alerts have fired to prevent spam.
@@ -190,10 +86,6 @@ impl AppState {
             provider_refresh_started_at: None,
             provider_refresh_generation: 0,
             is_refreshing: false,
-            update_state: UpdateState::Idle,
-            update_info: None,
-            last_update_check_ms: None,
-            installer_path: None,
             proof_config: None,
             notification_manager: codexbar::notifications::NotificationManager::new(),
             last_shown_at: None,
@@ -316,21 +208,6 @@ impl AppState {
         self.current_target = next_target;
 
         transition
-    }
-
-    /// Build an enriched update payload using the stored update info.
-    pub fn update_payload(&self) -> UpdateStatePayload {
-        let mut p = self.update_state.to_payload();
-        if let Some(ref info) = self.update_info {
-            if p.version.is_none() {
-                p.version = Some(info.version.clone());
-            }
-            p.release_url = Some(info.release_url.clone());
-            p.can_download = info.supports_auto_download();
-            p.can_apply = info.supports_auto_apply();
-        }
-        p.last_checked_at_ms = self.last_update_check_ms;
-        p
     }
 }
 

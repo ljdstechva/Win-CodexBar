@@ -147,6 +147,7 @@ export const PROVIDER_ICON_REGISTRY: Record<string, ProviderIcon> = {
   augment:     { id: "augment",     brandColor: "#6366f1", fallbackLetter: "A", svgPath: RAW.augment },
   claude:      { id: "claude",      brandColor: "#cc7c5e", fallbackLetter: "◈", svgPath: RAW.claude },
   codebuff:    { id: "codebuff",    brandColor: "#44ff00", fallbackLetter: "B", svgPath: RAW.codebuff },
+  chatgpt:     { id: "chatgpt",     brandColor: "#49a3b0", fallbackLetter: "◆", svgPath: RAW.codex },
   codex:       { id: "codex",       brandColor: "#49a3b0", fallbackLetter: "◆", svgPath: RAW.codex },
   copilot:     { id: "copilot",     brandColor: "#a855f7", fallbackLetter: "⬡", svgPath: RAW.copilot },
   cursor:      { id: "cursor",      brandColor: "#00bfa5", fallbackLetter: "▸", svgPath: RAW.cursor },

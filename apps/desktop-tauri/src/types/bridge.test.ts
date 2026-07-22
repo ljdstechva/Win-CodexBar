@@ -86,6 +86,7 @@ describe("Language type", () => {
       floatBarDarkText: false,
       floatBarShowResetInline: false,
       floatBarShowCost: false,
+      floatBarShowAccount: true,
     };
     expect(snap.uiLanguage).toBe("spanish");
 

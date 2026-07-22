@@ -155,10 +155,16 @@ fn apply_provider_order_ignores_unknown_ids() {
 
 #[test]
 fn provider_summaries_reflect_settings_order() {
-    let canonical_len = codexbar::core::ProviderId::all().len();
     let s = Settings::default();
+    let visible_len = codexbar::core::ProviderId::all()
+        .iter()
+        .filter(|provider| {
+            !provider.is_deprecated() || s.enabled_providers.contains(provider.cli_name())
+        })
+        .count();
     let summaries: Vec<ProviderSummary> = super::build_provider_summaries(&s);
-    assert_eq!(summaries.len(), canonical_len);
+    assert_eq!(summaries.len(), visible_len);
+    assert!(summaries.iter().any(|summary| summary.id == "chatgpt"));
     // Index is assigned in emission order.
     for (i, s) in summaries.iter().enumerate() {
         assert_eq!(s.order, i as u32);
@@ -224,15 +230,21 @@ fn settings_snapshot_preserves_partial_config_order_for_enabled_providers() {
             .collect::<Vec<_>>(),
         vec!["gemini", "claude", "codex"],
     );
+    assert_eq!(snapshot["floatBarShowAccount"], true);
 }
 
 #[test]
 fn provider_cookie_source_lookup_roundtrips_known_providers() {
     let mut s = Settings::default();
     super::provider_cookie_source_set(&mut s, "codex", "cli-config".to_string()).unwrap();
+    super::provider_cookie_source_set(&mut s, "chatgpt", "auto".to_string()).unwrap();
     assert_eq!(
         provider_cookie_source_lookup(&s, "codex").as_deref(),
         Some("cli-config")
+    );
+    assert_eq!(
+        provider_cookie_source_lookup(&s, "chatgpt").as_deref(),
+        Some("auto")
     );
     assert!(provider_cookie_source_lookup(&s, "unknown-provider").is_none());
 }
@@ -315,6 +327,65 @@ fn fetch_context_cursor_cookie_off_stays_cli() {
 
     // Explicit cookie-off keeps Cli (no browser scrape).
     assert_eq!(ctx.source_mode, SourceMode::Cli);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
+fn fetch_context_chatgpt_defaults_to_opt_in_browser_source() {
+    let settings = Settings::default();
+    let mut cookies = ManualCookies::default();
+    cookies.set("chatgpt", "session=fixture");
+    let api_keys = ApiKeys::default();
+    let token_accounts = HashMap::new();
+
+    let ctx = super::build_fetch_context(
+        ProviderId::ChatGPT,
+        &settings,
+        &cookies,
+        &api_keys,
+        &token_accounts,
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::Auto);
+    assert_eq!(ctx.manual_cookie_header.as_deref(), Some("session=fixture"));
+}
+
+#[test]
+fn fetch_context_chatgpt_automatic_defers_browser_profile_selection() {
+    let settings = Settings::default();
+    let cookies = ManualCookies::default();
+    let api_keys = ApiKeys::default();
+    let token_accounts = HashMap::new();
+
+    let ctx = super::build_fetch_context(
+        ProviderId::ChatGPT,
+        &settings,
+        &cookies,
+        &api_keys,
+        &token_accounts,
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::Auto);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
+fn fetch_context_chatgpt_manual_without_cookie_stays_web() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::ChatGPT, "manual");
+    let cookies = ManualCookies::default();
+    let api_keys = ApiKeys::default();
+    let token_accounts = HashMap::new();
+
+    let ctx = super::build_fetch_context(
+        ProviderId::ChatGPT,
+        &settings,
+        &cookies,
+        &api_keys,
+        &token_accounts,
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::Web);
     assert!(ctx.manual_cookie_header.is_none());
 }
 
@@ -924,11 +995,8 @@ fn claude_cli_parse_failure_keeps_last_good_every_time() {
         ProviderId::Claude,
         err.clone(),
     );
-    let second = super::providers::preserve_last_good_transient_failure(
-        &mut state,
-        ProviderId::Claude,
-        err,
-    );
+    let second =
+        super::providers::preserve_last_good_transient_failure(&mut state, ProviderId::Claude, err);
 
     assert_eq!(first.error, None);
     assert_eq!(first.primary.used_percent, 17.0);
@@ -950,16 +1018,14 @@ fn claude_hard_credentials_missing_does_not_preserve_stale() {
     let err = ProviderUsageSnapshot::from_error(
         ProviderId::Claude,
         &metadata,
-        "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate.".to_string(),
+        "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate."
+            .to_string(),
     );
     let mut state = crate::state::AppState::new();
     state.provider_cache.push(good);
 
-    let out = super::providers::preserve_last_good_transient_failure(
-        &mut state,
-        ProviderId::Claude,
-        err,
-    );
+    let out =
+        super::providers::preserve_last_good_transient_failure(&mut state, ProviderId::Claude, err);
     assert!(out.error.is_some());
 }
 
@@ -1069,7 +1135,7 @@ fn chart_data_for_unknown_provider_is_empty() {
 }
 
 #[test]
-fn japanese_provider_snapshot_localizes_weekly_label() {
+fn secondary_without_duration_preserves_weekly_fallback_label() {
     let metadata = instantiate_provider(ProviderId::Claude).metadata().clone();
     let usage = codexbar::core::UsageSnapshot::new(codexbar::core::RateWindow::new(10.0))
         .with_secondary(codexbar::core::RateWindow::new(20.0));
@@ -1082,12 +1148,107 @@ fn japanese_provider_snapshot_localizes_weekly_label() {
 
     let snapshot = ProviderUsageSnapshot::from_fetch_result(ProviderId::Claude, &metadata, &result);
 
-    // Secondary label stays raw; localization happens at render time.
+    // Older provider sources can omit timing metadata. In that case the
+    // established secondary-window meaning remains the weekly fallback.
     assert_eq!(snapshot.secondary_label, Some("Weekly".to_string()));
 }
 
 #[test]
-fn japanese_provider_snapshot_localizes_pace_reserve_description() {
+fn weekly_only_codex_snapshot_is_not_labeled_as_session() {
+    let metadata = instantiate_provider(ProviderId::Codex).metadata().clone();
+    let weekly = codexbar::core::RateWindow::with_details(10.0, Some(7 * 24 * 60), None, None);
+    let result = ProviderFetchResult {
+        usage: codexbar::core::UsageSnapshot::new(weekly),
+        cost: None,
+        wayfinder_usage: None,
+        source_label: "OAuth".to_string(),
+    };
+
+    let snapshot = ProviderUsageSnapshot::from_fetch_result(ProviderId::Codex, &metadata, &result);
+
+    assert_eq!(snapshot.primary_label, Some("Weekly".to_string()));
+    assert!(snapshot.secondary.is_none());
+    let (session, weekly) = super::provider_detail_usage_windows(&snapshot);
+    assert!(session.is_none());
+    assert_eq!(weekly.expect("weekly window").used_percent, 10.0);
+}
+
+#[test]
+fn account_only_provider_detail_hides_transport_rate_window() {
+    let metadata = instantiate_provider(ProviderId::ChatGPT).metadata().clone();
+    let usage = codexbar::core::UsageSnapshot::account_only().with_login_method("Team");
+    let result = ProviderFetchResult {
+        usage,
+        cost: None,
+        wayfinder_usage: None,
+        source_label: "web".to_string(),
+    };
+    let snapshot =
+        ProviderUsageSnapshot::from_fetch_result(ProviderId::ChatGPT, &metadata, &result);
+
+    let (session, weekly) = super::provider_detail_usage_windows(&snapshot);
+
+    assert!(session.is_none());
+    assert!(weekly.is_none());
+}
+
+#[test]
+fn chatgpt_error_snapshot_remains_account_only() {
+    let metadata = instantiate_provider(ProviderId::ChatGPT).metadata().clone();
+    let snapshot = ProviderUsageSnapshot::from_error(
+        ProviderId::ChatGPT,
+        &metadata,
+        "Authentication required".to_string(),
+    );
+
+    assert!(snapshot.account_only);
+    let (session, weekly) = super::provider_detail_usage_windows(&snapshot);
+    assert!(session.is_none());
+    assert!(weekly.is_none());
+}
+
+#[test]
+fn provider_snapshot_serializes_subscription_end_in_camel_case() {
+    let metadata = instantiate_provider(ProviderId::ChatGPT).metadata().clone();
+    let subscription_end = chrono::DateTime::parse_from_rfc3339("2026-08-31T16:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let usage = codexbar::core::UsageSnapshot::account_only()
+        .with_login_method("Pro")
+        .with_subscription_ends_at(subscription_end);
+    let result = ProviderFetchResult {
+        usage,
+        cost: None,
+        wayfinder_usage: None,
+        source_label: "Fixture".to_string(),
+    };
+
+    let snapshot =
+        ProviderUsageSnapshot::from_fetch_result(ProviderId::ChatGPT, &metadata, &result);
+    let json = serde_json::to_value(snapshot).unwrap();
+
+    assert_eq!(
+        json.get("subscriptionEndsAt")
+            .and_then(|value| value.as_str()),
+        Some("2026-08-31T16:00:00+00:00")
+    );
+    assert_eq!(
+        json.get("accountOnly").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        json.get("providerId").and_then(|value| value.as_str()),
+        Some("chatgpt")
+    );
+    assert_eq!(
+        json.get("planName").and_then(|value| value.as_str()),
+        Some("Pro")
+    );
+    assert!(json.get("subscription_ends_at").is_none());
+}
+
+#[test]
+fn provider_snapshot_exposes_primary_and_weekly_pace() {
     use chrono::{Duration, Utc};
 
     let metadata = instantiate_provider(ProviderId::Claude).metadata().clone();
@@ -1099,8 +1260,13 @@ fn japanese_provider_snapshot_localizes_pace_reserve_description() {
         Some(now + Duration::minutes(7 * 24 * 60 / 2)),
         None,
     );
-    let usage = codexbar::core::UsageSnapshot::new(codexbar::core::RateWindow::new(10.0))
-        .with_secondary(secondary);
+    let primary = codexbar::core::RateWindow::with_details(
+        55.0,
+        Some(5 * 60),
+        Some(now + Duration::minutes(5 * 60 / 2)),
+        None,
+    );
+    let usage = codexbar::core::UsageSnapshot::new(primary).with_secondary(secondary);
     let result = ProviderFetchResult {
         usage,
         cost: None,
@@ -1110,19 +1276,30 @@ fn japanese_provider_snapshot_localizes_pace_reserve_description() {
 
     let snapshot = ProviderUsageSnapshot::from_fetch_result(ProviderId::Claude, &metadata, &result);
 
+    let primary_pace = snapshot.pace.expect("primary pace");
+    assert_eq!(primary_pace.stage, "slightly_ahead");
+    assert!((primary_pace.expected_used_percent - 50.0).abs() < 0.1);
+    assert_eq!(primary_pace.actual_used_percent, 55.0);
+
     // Reserve data stays raw; localization happens at render time.
     let secondary = snapshot.secondary.as_ref().expect("secondary window");
     assert!(secondary.reserve_percent.is_some());
     assert!(secondary.reserve_will_last_to_reset);
     assert!(secondary.reserve_description.is_none());
+
+    let weekly_pace = snapshot.weekly_pace.expect("weekly pace");
+    assert_eq!(weekly_pace.stage, "behind");
+    assert!((weekly_pace.expected_used_percent - 50.0).abs() < 0.1);
+    assert_eq!(weekly_pace.actual_used_percent, 40.0);
+    assert!(weekly_pace.will_last_to_reset);
 }
 
 #[test]
-fn chart_data_requires_account_email_for_codex() {
-    let data = super::build_provider_chart_data("codex".into(), None);
-    assert_eq!(data.provider_id, "codex");
-    assert!(data.credits_history.is_empty());
-    assert!(data.usage_breakdown.is_empty());
+fn openai_dashboard_chart_data_requires_account_email_for_codex() {
+    let (credits_history, usage_breakdown) =
+        super::chart::load_openai_dashboard_chart_data("codex", None);
+    assert!(credits_history.is_empty());
+    assert!(usage_breakdown.is_empty());
 }
 
 #[test]
@@ -1133,6 +1310,12 @@ fn cookie_options_for_cookie_supporting_provider() {
     assert!(opts.iter().any(|o| o.label == "Automatic"));
     assert!(opts.iter().any(|o| o.label == "Manual"));
     assert!(opts.iter().any(|o| o.label == "Disabled"));
+
+    let chatgpt_values = super::cookie_source_options_for("chatgpt", Language::English)
+        .into_iter()
+        .map(|option| option.value)
+        .collect::<Vec<_>>();
+    assert_eq!(chatgpt_values, vec!["auto", "manual"]);
 }
 
 #[test]
@@ -1236,11 +1419,10 @@ fn external_url_validator_rejects_non_web_and_control_urls() {
 
 // ── Phase 13 — E2E IPC harness ─────────────────────────────────
 //
-// Build the full bootstrap payload and prove that every shared
-// `ProviderId` variant ends up in the provider catalog with a
-// non-empty id + display name. If a new provider is added to the
-// enum but never wired through the desktop catalog, this test will
-// fail with `missing provider in bootstrap catalog: <id>`.
+// Build the full bootstrap payload and prove that every visible shared
+// `ProviderId` variant ends up in the provider catalog with a non-empty id
+// and display name. Soft-removed providers stay hidden unless the user had
+// already enabled them.
 
 #[test]
 fn bootstrap_payload_exposes_every_provider_variant() {
@@ -1261,7 +1443,10 @@ fn bootstrap_payload_exposes_every_provider_variant() {
         );
     }
 
-    for provider in ProviderId::all() {
+    for provider in ProviderId::all()
+        .iter()
+        .filter(|provider| !provider.is_deprecated())
+    {
         let expected = provider.cli_name().to_string();
         assert!(
             catalog_ids.contains(&expected),
@@ -1271,9 +1456,10 @@ fn bootstrap_payload_exposes_every_provider_variant() {
 
     assert_eq!(
         catalog_ids.len(),
-        ProviderId::all().len(),
-        "bootstrap catalog size drifted from ProviderId::all()"
+        payload.providers.len(),
+        "bootstrap catalog contains duplicate provider ids"
     );
+    assert!(catalog_ids.len() <= ProviderId::all().len());
 
     // Sanity — payload must also round-trip through JSON cleanly so
     // the TypeScript bridge never sees a partially-populated record.

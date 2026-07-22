@@ -22,8 +22,10 @@ body.floatbar-window #root {
  * group reads like a compact widget sitting on the Windows taskbar. */
 .floatbar {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
   gap: calc(4px * var(--floatbar-scale, 1));
   padding: 0;
   background: transparent;
@@ -32,11 +34,30 @@ body.floatbar-window #root {
   -webkit-user-select: none;
   user-select: none;
   width: max-content;
+  min-width: max-content;
+  max-width: none;
   height: max-content;
+  overflow: visible;
+  transition: opacity 120ms ease;
 }
 .floatbar--vertical {
-  flex-direction: column;
+  gap: calc(3px * var(--floatbar-scale, 1));
+}
+.floatbar__body {
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: flex-end;
+  gap: calc(4px * var(--floatbar-scale, 1));
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: max-content;
+  overflow: visible;
+}
+.floatbar__body--vertical {
+  flex-direction: column;
+  align-items: flex-end;
   gap: calc(3px * var(--floatbar-scale, 1));
 }
 /* Compact line grip, matching the small handle affordance in Windows taskbar
@@ -81,6 +102,7 @@ body.floatbar-window #root {
 }
 .floatbar__pill {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: calc(3px * var(--floatbar-scale, 1));
   padding: calc(1px * var(--floatbar-scale, 1)) calc(5px * var(--floatbar-scale, 1));
@@ -94,10 +116,10 @@ body.floatbar-window #root {
     inset 0 1px 0 rgba(255, 255, 255, 0.58),
     0 1px 2px rgba(14, 42, 62, 0.22);
   white-space: nowrap;
+  min-width: max-content;
   cursor: grab;
 }
 .floatbar__pill *,
-.floatbar__cost-pill *,
 .floatbar__handle *,
 .floatbar__empty * {
   pointer-events: none;
@@ -107,71 +129,60 @@ body.floatbar-window #root {
   align-items: center;
   justify-content: center;
 }
-.floatbar__cost-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(4px * var(--floatbar-scale, 1));
-  min-height: calc(16px * var(--floatbar-scale, 1));
-  padding: calc(1px * var(--floatbar-scale, 1)) calc(6px * var(--floatbar-scale, 1));
-  border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
-  backdrop-filter: blur(16px) saturate(145%);
-  -webkit-backdrop-filter: blur(16px) saturate(145%);
-  border: 1px solid var(--brand, rgba(255, 255, 255, 0.48));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.58),
-    0 1px 2px rgba(14, 42, 62, 0.22);
-  white-space: nowrap;
-  cursor: grab;
+.floatbar--vertical .floatbar__pill {
+  flex-direction: column;
+  align-self: flex-end;
+  gap: calc(2px * var(--floatbar-scale, 1));
 }
-.floatbar__cost-items {
+.floatbar__usage-items {
   display: inline-flex;
-  align-items: center;
-  gap: calc(5px * var(--floatbar-scale, 1));
+  flex-direction: column;
+  align-items: stretch;
+  gap: calc(2px * var(--floatbar-scale, 1));
   line-height: 1;
 }
-.floatbar__cost-item {
+.floatbar__usage-row {
   display: inline-flex;
-  align-items: baseline;
-  gap: calc(2px * var(--floatbar-scale, 1));
+  align-items: center;
+  justify-content: center;
+  gap: calc(3px * var(--floatbar-scale, 1));
   font-variant-numeric: tabular-nums;
 }
-.floatbar__cost-label {
+.floatbar__usage-label {
+  min-width: 1.6em;
   font-size: 0.78em;
-  font-weight: 600;
-  opacity: 0.66;
-}
-.floatbar__cost-value {
   font-weight: 700;
-}
-.floatbar--vertical .floatbar__cost-pill {
-  flex-direction: column;
-  gap: calc(2px * var(--floatbar-scale, 1));
-}
-.floatbar--vertical .floatbar__cost-items {
-  flex-direction: column;
-  gap: calc(2px * var(--floatbar-scale, 1));
-}
-.floatbar__pill--warn {
-  background: rgba(250, 221, 171, 0.84);
-  border-color: rgba(255, 246, 219, 0.62);
-  color: #7a4c05;
-}
-.floatbar__pill--crit {
-  background: rgba(255, 194, 194, 0.86);
-  border-color: rgba(255, 236, 236, 0.66);
-  color: #7f1d1d;
-}
-.floatbar__text {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(4px * var(--floatbar-scale, 1));
-  line-height: 1;
+  opacity: 0.78;
+  text-align: right;
 }
 .floatbar__pct {
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   line-height: 1;
+}
+.floatbar__account {
+  border-color: var(--brand, rgba(255, 255, 255, 0.48));
+}
+.floatbar__account-text {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+.floatbar--vertical .floatbar__account {
+  align-items: flex-end;
+  align-self: flex-end;
+}
+.floatbar--vertical .floatbar__account-text {
+  text-align: right;
+}
+.floatbar--taskbar .floatbar__account,
+.floatbar--floating .floatbar__account {
+  white-space: nowrap;
+}
+.floatbar [data-unavailable="true"]:not([data-usage-tone]) {
+  color: #94a3b8;
 }
 .floatbar__reset {
   display: inline-flex;
@@ -192,10 +203,29 @@ body.floatbar-window #root {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.floatbar--vertical .floatbar__text {
-  flex-direction: column;
-  align-items: center;
-  gap: calc(1px * var(--floatbar-scale, 1));
+[data-usage-tone="green"] {
+  color: #166534;
+}
+[data-usage-tone="yellow"] {
+  color: #9a6700;
+}
+[data-usage-tone="orange"] {
+  color: #c2410c;
+}
+[data-usage-tone="red"] {
+  color: #b91c1c;
+}
+.floatbar--floating:not(.floatbar--light-bg) [data-usage-tone="green"] {
+  color: #4ade80;
+}
+.floatbar--floating:not(.floatbar--light-bg) [data-usage-tone="yellow"] {
+  color: #fde047;
+}
+.floatbar--floating:not(.floatbar--light-bg) [data-usage-tone="orange"] {
+  color: #fb923c;
+}
+.floatbar--floating:not(.floatbar--light-bg) [data-usage-tone="red"] {
+  color: #f87171;
 }
 .floatbar__empty {
   display: inline-flex;
@@ -218,19 +248,10 @@ body.floatbar-window #root {
   color: rgba(20, 22, 26, 0.95);
 }
 .floatbar--light-bg .floatbar__pill,
-.floatbar--light-bg .floatbar__cost-pill,
 .floatbar--light-bg .floatbar__empty {
   background: rgba(248, 252, 255, 0.82);
   border-color: rgba(255, 255, 255, 0.64);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
-  color: #92400e;
-}
-.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
-  color: #991b1b;
 }
 .floatbar--light-bg .floatbar__handle {
   background-color: transparent;
@@ -279,24 +300,13 @@ body.floatbar-window #root {
     radial-gradient(circle, rgba(255, 255, 255, 0.7) 1px, transparent 1.5px);
   background-size: calc(4px * var(--floatbar-scale, 1)) calc(3px * var(--floatbar-scale, 1));
 }
-.floatbar--floating .floatbar__pill,
-.floatbar--floating .floatbar__cost-pill {
+.floatbar--floating .floatbar__pill {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.22));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-.floatbar--floating .floatbar__pill--warn {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #f59e0b;
-  color: #fbbf24;
-}
-.floatbar--floating .floatbar__pill--crit {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #ef4444;
-  color: #fca5a5;
 }
 .floatbar--floating .floatbar__empty {
   border-radius: 999px;
@@ -308,19 +318,10 @@ body.floatbar-window #root {
   color: rgba(20, 22, 26, 0.95);
 }
 .floatbar--floating.floatbar--light-bg .floatbar__pill,
-.floatbar--floating.floatbar--light-bg .floatbar__cost-pill,
 .floatbar--floating.floatbar--light-bg .floatbar__empty {
   background: rgba(255, 255, 255, 0.55);
   border-color: var(--brand, rgba(20, 22, 26, 0.25));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-.floatbar--floating.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
-  color: #92400e;
-}
-.floatbar--floating.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
-  color: #991b1b;
 }
 .floatbar--floating.floatbar--light-bg .floatbar__handle {
   background-color: rgba(20, 22, 26, 0.10);
@@ -329,4 +330,43 @@ body.floatbar-window #root {
 }
 .floatbar--floating.floatbar--light-bg .floatbar__handle:hover {
   background-color: rgba(20, 22, 26, 0.18);
+}
+
+/* User-selected high-visibility dark treatment. Kept last so it remains
+ * readable even when the legacy dark-text/light-background flag is enabled. */
+.floatbar.floatbar--dark-contrast {
+  color: #f8fafc;
+}
+.floatbar--dark-contrast .floatbar__pill,
+.floatbar--dark-contrast .floatbar__empty,
+.floatbar--floating.floatbar--dark-contrast .floatbar__pill,
+.floatbar--floating.floatbar--dark-contrast .floatbar__empty {
+  background: rgba(15, 23, 42, 0.94);
+  border-color: rgba(148, 163, 184, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 5px rgba(0, 0, 0, 0.42);
+}
+.floatbar--dark-contrast .floatbar__usage-label,
+.floatbar--dark-contrast .floatbar__reset {
+  color: #e2e8f0;
+  opacity: 0.9;
+}
+.floatbar--dark-contrast [data-usage-tone="green"] {
+  color: #4ade80;
+}
+.floatbar--dark-contrast [data-usage-tone="yellow"] {
+  color: #fde047;
+}
+.floatbar--dark-contrast [data-usage-tone="orange"] {
+  color: #fb923c;
+}
+.floatbar--dark-contrast [data-usage-tone="red"] {
+  color: #f87171;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floatbar {
+    transition: none;
+  }
 }

@@ -8,17 +8,18 @@
 use super::{Provider, ProviderId};
 use crate::providers::{
     AbacusProvider, AiAndProvider, AlibabaProvider, AlibabaTokenPlanProvider, AmpProvider,
-    AntigravityProvider, AugmentProvider, AzureOpenAIProvider, BedrockProvider, ChutesProvider,
-    ClinePassProvider, ClaudeProvider, CodebuffProvider, CodexProvider, CommandCodeProvider,
-    CopilotProvider, CrofProvider, CrossModelProvider, CursorProvider, DeepInfraProvider,
-    DeepSeekProvider, DeepgramProvider, DevinProvider, DoubaoProvider, ElevenLabsProvider,
-    FactoryProvider, GeminiProvider, GrokProvider, GroqProvider, InfiniProvider, JetBrainsProvider,
-    KiloProvider, KimiK2Provider, KimiProvider, KiroProvider, LLMProxyProvider, LiteLLMProvider,
-    LongCatProvider, ManusProvider, MiMoProvider, MiniMaxProvider, MistralProvider, NanoGPTProvider,
-    NeuralwattProvider, OllamaProvider, OpenAIApiProvider, OpenCodeGoProvider, OpenCodeProvider,
-    OpenRouterProvider, PerplexityProvider, PoeProvider, QoderProvider, SakanaProvider,
-    StepFunProvider, Sub2ApiProvider, T3ChatProvider, VeniceProvider, VertexAIProvider,
-    WarpProvider, WayfinderProvider, WindsurfProvider, ZaiProvider, ZedProvider, ZenMuxProvider,
+    AntigravityProvider, AugmentProvider, AzureOpenAIProvider, BedrockProvider, ChatGPTProvider,
+    ChutesProvider, ClaudeProvider, ClinePassProvider, CodebuffProvider, CodexProvider,
+    CommandCodeProvider, CopilotProvider, CrofProvider, CrossModelProvider, CursorProvider,
+    DeepInfraProvider, DeepSeekProvider, DeepgramProvider, DevinProvider, DoubaoProvider,
+    ElevenLabsProvider, FactoryProvider, GeminiProvider, GrokProvider, GroqProvider,
+    InfiniProvider, JetBrainsProvider, KiloProvider, KimiK2Provider, KimiProvider, KiroProvider,
+    LLMProxyProvider, LiteLLMProvider, LongCatProvider, ManusProvider, MiMoProvider,
+    MiniMaxProvider, MistralProvider, NanoGPTProvider, NeuralwattProvider, OllamaProvider,
+    OpenAIApiProvider, OpenCodeGoProvider, OpenCodeProvider, OpenRouterProvider,
+    PerplexityProvider, PoeProvider, QoderProvider, SakanaProvider, StepFunProvider,
+    Sub2ApiProvider, T3ChatProvider, VeniceProvider, VertexAIProvider, WarpProvider,
+    WayfinderProvider, WindsurfProvider, ZaiProvider, ZedProvider, ZenMuxProvider,
 };
 
 /// Instantiate the concrete [`Provider`] implementation for a given [`ProviderId`].
@@ -29,6 +30,7 @@ pub fn instantiate(id: ProviderId) -> Box<dyn Provider> {
     match id {
         ProviderId::Claude => Box::new(ClaudeProvider::new()),
         ProviderId::Codex => Box::new(CodexProvider::new()),
+        ProviderId::ChatGPT => Box::new(ChatGPTProvider::new()),
         ProviderId::Cursor => Box::new(CursorProvider::new()),
         ProviderId::Gemini => Box::new(GeminiProvider::new()),
         ProviderId::Copilot => Box::new(CopilotProvider::new()),

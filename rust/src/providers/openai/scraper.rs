@@ -3,7 +3,9 @@
 //! JavaScript-based scraper for extracting usage data from the OpenAI/ChatGPT dashboard.
 //! Uses React Fiber inspection to extract data from chart components.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Usage breakdown by service (e.g., GPT-4, DALL-E)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,9 @@ pub struct OpenAIDashboardData {
     pub auth_status: Option<String>,
     /// Account plan from ChatGPT bootstrap or Next data
     pub account_plan: Option<String>,
+    /// Authoritative ChatGPT entitlement expiry, when the account API exposes one
+    #[serde(default)]
+    pub subscription_ends_at: Option<DateTime<Utc>>,
     /// Organization name
     pub organization: Option<String>,
     /// Purchase credits URL
@@ -73,7 +78,7 @@ impl OpenAIDashboardData {
 /// This script is injected into the ChatGPT dashboard page to extract usage data.
 /// It uses React Fiber inspection to access chart data that isn't directly in the DOM.
 pub const OPENAI_DASHBOARD_SCRAPE_SCRIPT: &str = r#"
-(() => {
+(async () => {
   const textOf = el => {
     const raw = el && (el.innerText || el.textContent) ? String(el.innerText || el.textContent) : '';
     return raw.trim();
@@ -320,6 +325,33 @@ pub const OPENAI_DASHBOARD_SCRAPE_SCRIPT: &str = r#"
     return null;
   };
 
+  const findSubscriptionEnd = async () => {
+    try {
+      const bootstrap = parseJsonScript('client-bootstrap');
+      const accessToken = bootstrap?.session?.accessToken;
+      const accountId = bootstrap?.session?.account?.id;
+      if (!accessToken || !accountId) return null;
+      const response = await fetch('/backend-api/accounts/check/v4-2023-04-27', {
+        credentials: 'same-origin',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'chatgpt-account-id': accountId
+        }
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const account = payload?.accounts?.[accountId];
+      const raw = account?.entitlement?.expires_at;
+      if (typeof raw !== 'string') return null;
+      const timestamp = Date.parse(raw);
+      return Number.isFinite(timestamp) && timestamp > Date.now()
+        ? new Date(timestamp).toISOString()
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
   // Extract usage breakdown from chart
   const extractUsageBreakdown = () => {
     const breakdown = [];
@@ -359,6 +391,7 @@ pub const OPENAI_DASHBOARD_SCRAPE_SCRIPT: &str = r#"
       return typeof bootstrap?.authStatus === 'string' ? bootstrap.authStatus : null;
     })(),
     account_plan: findPlan(parseJsonScript('client-bootstrap')) || findPlan(parseJsonScript('__NEXT_DATA__')),
+    subscription_ends_at: await findSubscriptionEnd(),
     organization: null,
     purchase_url: null
   };
@@ -372,9 +405,197 @@ pub fn parse_dashboard_json(json: &str) -> Result<OpenAIDashboardData, serde_jso
     serde_json::from_str(json)
 }
 
+/// Minimal private session material needed to call ChatGPT's account endpoint.
+///
+/// This intentionally does not implement `Debug` or serialization so access
+/// tokens and account identifiers cannot accidentally enter diagnostics or
+/// persisted snapshots.
+pub(crate) struct ChatGPTBootstrapSession {
+    pub(crate) access_token: String,
+    pub(crate) account_id: String,
+}
+
+/// Parse one JSON script element without retaining the surrounding page.
+pub(crate) fn parse_json_script(html: &str, id: &str) -> Option<Value> {
+    let marker = format!("id=\"{id}\"");
+    let marker_start = html.find(&marker)?;
+    let content_start = html[marker_start..].find('>')? + marker_start + 1;
+    let content_end = html[content_start..].find("</script>")? + content_start;
+    serde_json::from_str(html[content_start..content_end].trim()).ok()
+}
+
+pub(crate) fn chatgpt_bootstrap_session(value: &Value) -> Option<ChatGPTBootstrapSession> {
+    Some(ChatGPTBootstrapSession {
+        access_token: value.pointer("/session/accessToken")?.as_str()?.to_string(),
+        account_id: value.pointer("/session/account/id")?.as_str()?.to_string(),
+    })
+}
+
+/// Extract the already-authoritative plan label from ChatGPT bootstrap data.
+pub(crate) fn chatgpt_account_plan(value: &Value) -> Option<String> {
+    let mut queue = vec![value];
+    let mut visited = 0usize;
+
+    while let Some(current) = queue.pop() {
+        visited += 1;
+        if visited > 6_000 {
+            break;
+        }
+        match current {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let key = key.to_ascii_lowercase();
+                    if (key.contains("plan")
+                        || key.contains("tier")
+                        || key.contains("subscription"))
+                        && let Some(raw) = child.as_str()
+                        && let Some(plan) = normalize_chatgpt_plan(raw)
+                    {
+                        return Some(plan);
+                    }
+                    if child.is_array() || child.is_object() {
+                        queue.push(child);
+                    }
+                }
+            }
+            Value::Array(values) => queue.extend(values),
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn normalize_chatgpt_plan(raw: &str) -> Option<String> {
+    let lower = raw.trim().to_ascii_lowercase();
+    const ALLOWED: &[&str] = &[
+        "free",
+        "plus",
+        "pro",
+        "team",
+        "enterprise",
+        "business",
+        "edu",
+        "education",
+        "gov",
+        "premium",
+        "essential",
+    ];
+    if !ALLOWED.iter().any(|candidate| lower.contains(candidate)) {
+        return None;
+    }
+
+    // The accounts endpoint currently emits compact identifiers such as
+    // `chatgptpro`. Normalize those to the same human plan label as the web
+    // bootstrap without retaining any other account metadata.
+    let compact = lower
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>();
+    const CANONICAL_COMPACT: &[(&str, &str)] = &[
+        ("enterprise", "Enterprise"),
+        ("education", "Education"),
+        ("business", "Business"),
+        ("essential", "Essential"),
+        ("premium", "Premium"),
+        ("plus", "Plus"),
+        ("team", "Team"),
+        ("free", "Free"),
+        ("pro", "Pro"),
+        ("edu", "EDU"),
+        ("gov", "GOV"),
+    ];
+    if (compact.starts_with("chatgpt") || compact.starts_with("openai"))
+        && let Some((_, label)) = CANONICAL_COMPACT
+            .iter()
+            .find(|(candidate, _)| compact.ends_with(candidate))
+    {
+        return Some((*label).to_string());
+    }
+
+    let words = raw
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .filter(|word| {
+            !matches!(
+                word.to_ascii_lowercase().as_str(),
+                "openai" | "chatgpt" | "account" | "plan" | "subscription"
+            )
+        })
+        .map(|word| {
+            let lower = word.to_ascii_lowercase();
+            match lower.as_str() {
+                "edu" | "gov" => lower.to_ascii_uppercase(),
+                _ => {
+                    let mut chars = lower.chars();
+                    chars
+                        .next()
+                        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                        .unwrap_or_default()
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+/// Extract a normalized plan only from the explicitly selected account in an
+/// accounts-check response. Never fall back to another account in the map.
+pub(crate) fn parse_chatgpt_plan_from_accounts_json(
+    json: &str,
+    account_id: &str,
+) -> Option<String> {
+    let value: Value = serde_json::from_str(json).ok()?;
+    let account = value.get("accounts")?.as_object()?.get(account_id)?;
+    chatgpt_account_plan(account)
+}
+
+/// Extract an authoritative, future ChatGPT entitlement expiry from the
+/// accounts-check payload. Auth/session token expiries are intentionally not
+/// considered here.
+pub fn parse_subscription_end_from_accounts_json(
+    json: &str,
+    account_id: Option<&str>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let value: Value = serde_json::from_str(json).ok()?;
+    let accounts = value.get("accounts")?.as_object()?;
+    let account = match account_id {
+        // When bootstrap identifies an active account, never borrow an
+        // entitlement from a different/default account in the same payload.
+        Some(id) => accounts.get(id)?,
+        None => accounts.get("default")?,
+    };
+    let raw = account.get("entitlement")?.get("expires_at")?;
+    let parsed = match raw {
+        Value::String(value) => DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|value| value.with_timezone(&Utc)),
+        Value::Number(value) => value.as_i64().and_then(|timestamp| {
+            let seconds = if timestamp > 10_000_000_000 {
+                timestamp / 1_000
+            } else {
+                timestamp
+            };
+            DateTime::from_timestamp(seconds, 0)
+        }),
+        _ => None,
+    }?;
+    (parsed > now).then_some(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{FetchContext, Provider, ProviderId, SourceMode};
+    use crate::providers::openai::ChatGPTProvider;
+
+    fn timestamp(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
 
     #[test]
     fn test_usage_breakdown() {
@@ -422,12 +643,144 @@ mod tests {
 
     #[test]
     fn test_parse_dashboard_json() {
-        let json = r#"{"credits_remaining":50.0,"credits_limit":100.0,"usage_breakdown":[],"credits_history":[],"email":"test@example.com","auth_status":"logged_in","account_plan":"Pro 5x","organization":null,"purchase_url":null}"#;
+        let json = r#"{"credits_remaining":50.0,"credits_limit":100.0,"usage_breakdown":[],"credits_history":[],"email":"test@example.com","auth_status":"logged_in","account_plan":"Pro 5x","subscription_ends_at":"2026-07-23T00:00:00Z","organization":null,"purchase_url":null}"#;
 
         let data = parse_dashboard_json(json).unwrap();
         assert_eq!(data.credits_remaining, Some(50.0));
         assert_eq!(data.email, Some("test@example.com".to_string()));
         assert_eq!(data.auth_status, Some("logged_in".to_string()));
         assert_eq!(data.account_plan, Some("Pro 5x".to_string()));
+        assert_eq!(
+            data.subscription_ends_at,
+            Some(timestamp("2026-07-23T00:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn parses_authoritative_chatgpt_entitlement_expiry() {
+        let json = r#"{
+            "accounts": {
+                "acct_123": {
+                    "entitlement": { "expires_at": "2026-07-23T00:00:00Z" }
+                }
+            }
+        }"#;
+
+        assert_eq!(
+            parse_subscription_end_from_accounts_json(
+                json,
+                Some("acct_123"),
+                timestamp("2026-07-22T00:00:00Z")
+            ),
+            Some(timestamp("2026-07-23T00:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn parses_compact_plan_only_from_the_selected_chatgpt_account() {
+        let json = r#"{
+            "accounts": {
+                "codex_account": {
+                    "entitlement": {
+                        "subscription_plan": "chatgptpro",
+                        "expires_at": "2026-07-23T00:00:00Z"
+                    }
+                },
+                "other_account": {
+                    "entitlement": { "subscription_plan": "chatgptteam" }
+                }
+            }
+        }"#;
+
+        assert_eq!(
+            parse_chatgpt_plan_from_accounts_json(json, "codex_account").as_deref(),
+            Some("Pro")
+        );
+        assert_eq!(
+            parse_chatgpt_plan_from_accounts_json(json, "other_account").as_deref(),
+            Some("Team")
+        );
+        assert_eq!(parse_chatgpt_plan_from_accounts_json(json, "missing"), None);
+    }
+
+    #[test]
+    fn ignores_past_chatgpt_entitlement_expiry() {
+        let json = r#"{
+            "accounts": {
+                "default": {
+                    "entitlement": { "expires_at": "2026-07-21T23:59:59Z" }
+                }
+            }
+        }"#;
+
+        assert_eq!(
+            parse_subscription_end_from_accounts_json(
+                json,
+                None,
+                timestamp("2026-07-22T00:00:00Z")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_missing_chatgpt_entitlement_expiry() {
+        let json = r#"{"accounts":{"default":{"entitlement":{}}}}"#;
+
+        assert_eq!(
+            parse_subscription_end_from_accounts_json(
+                json,
+                None,
+                timestamp("2026-07-22T00:00:00Z")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn never_falls_back_to_another_chatgpt_account_entitlement() {
+        let json = r#"{
+            "accounts": {
+                "active_without_expiry": { "entitlement": {} },
+                "default": {
+                    "entitlement": { "expires_at": "2026-07-23T00:00:00Z" }
+                }
+            }
+        }"#;
+
+        assert_eq!(
+            parse_subscription_end_from_accounts_json(
+                json,
+                Some("active_without_expiry"),
+                timestamp("2026-07-22T00:00:00Z")
+            ),
+            None
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an authenticated Codex/ChatGPT account"]
+    async fn live_chatgpt_scrape_has_future_subscription_end() {
+        let provider = ChatGPTProvider::new();
+        assert_eq!(provider.id(), ProviderId::ChatGPT);
+        let context = FetchContext {
+            source_mode: SourceMode::Auto,
+            ..FetchContext::default()
+        };
+        let result = provider
+            .fetch_usage(&context)
+            .await
+            .expect("the normal provider path must find the authenticated ChatGPT account");
+
+        assert!(result.usage.account_only);
+        assert_eq!(result.source_label, "oauth");
+        assert_eq!(result.usage.login_method.as_deref(), Some("Pro"));
+        assert!(
+            result
+                .usage
+                .subscription_ends_at
+                .is_some_and(|ends_at| ends_at > Utc::now()),
+            "the normal provider path did not select a future active-account entitlement"
+        );
     }
 }

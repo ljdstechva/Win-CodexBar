@@ -65,24 +65,47 @@ macOS-only shell polish (menu-bar layout editor, widgets, full hooks UI chrome) 
 - Add predictive pace warnings and provider/window-specific usage thresholds.
 - Add GPT-5.6 Sol, Terra, and Luna pricing and model aliases.
 - Show Claude model-scoped weekly quotas from OAuth, web, and CLI sources.
+- Show Claude's live Fable-only remaining quota and reset time as `FA` in the FloatBar capacity pill.
+- Show provider plan types and genuine subscription-expiry countdowns in menu cards and optional FloatBar account pills,
+  including an opt-in account-only ChatGPT web provider backed by its authoritative entitlement expiry.
+- Add a tray-toolbar X watchlist badge and bounded updates panel for `@thsottiaux`, `@OpenAI`, and `@sama`.
 
 ### Changed
-- Reorganize Settings and restore Providers as a dedicated tab.
-- Keep every Settings tab at the same window size.
+- Restore the accepted five-tab Settings shell and fold new notification/menu controls into General and Display.
+- Keep Providers at 600 px while returning ordinary Settings tabs to the compact 496 px width.
 - Improve token-cost pricing coverage, freshness, and refresh coalescing.
+- Split FloatBar native lifecycle, pure window derivation, and pill presentation into focused modules without
+  changing its accepted remaining-capacity layout or click-through behavior.
+- Keep X notifications inside the tray-opened dashboard and remove their controls and interaction state from FloatBar.
+- Document the product/design system in `PRODUCT.md`, `DESIGN.md`, and `.impeccable/design.json` for future UI work.
 
 ### Fixed
+- Capture watched-account replies through X's public syndication timeline and retain a timestamped seven-day notified
+  ledger so every newly discovered post, reply, or repost is surfaced once, including catch-up items missed earlier.
+- Keep the Windows FloatBar at the front of the topmost z-order band with a focus-safe native watchdog, preventing
+  newer topmost windows and shell/display transitions from leaving it behind while preserving click-through hover opacity.
 - Keep refresh intervals anchored and provider cards synchronized with completed work.
 - Avoid quota refreshes for visual-only settings and provider reorder changes.
 - Improve Antigravity detection, Gemini paid-tier labels, Ollama authentication, and other provider parsing.
-- Eliminate the duplicate FloatBar cost control and keep local-cost display opt-in.
+- Keep the FloatBar on remaining capacity, preserve its dark two-pill `5h`/`7d` layout, and remove its deprecated
+  cost control.
+- Treat null Codex quota windows as unavailable and classify weekly-only data by duration instead of presenting it as
+  a 5-hour session or a fabricated 0% row.
+- Restore statically bundled Settings/PopOut surfaces and the visible render-failure fallback after the 0.42 port.
+- Bound Agent Sessions inside the tray and align Wayfinder controls with the established Settings styles.
+- Add an opt-in no-activate proof path for passive Windows UI capture while the user is working.
+- Color tray bars and percent text from actual usage severity while preserving the selected used/remaining display value,
+  so a full remaining quota renders green and a nearly exhausted quota renders red.
 
 ---
 
 ## [Windows] 0.41.3 - 2026-07-11
 
 ### Added
-- Add local cost summaries to FloatBar.
+- Group unlabeled primary/weekly usage in FloatBar's top pill and shorten its sign-colored Pace labels to `5h`/`7d`.
+- Right-align the vertical FloatBar containers.
+- Add `5h`/`7d` labels to the top usage rows and use a high-contrast dark FloatBar treatment.
+- Fade click-through FloatBar to 10% opacity under the pointer and hide its inactive drag grip.
 - Add a PowerToys Command Palette status pipe.
 
 ### Fixed
@@ -91,6 +114,15 @@ macOS-only shell polish (menu-bar layout editor, widgets, full hooks UI chrome) 
 - Open Cursor's usage dashboard at the correct URL.
 - Align the popup correctly with a side-mounted Windows taskbar (#159).
 - Correct Codex daily usage reporting (#153, thanks @0reki).
+- Restore the PopOut dashboard refresh and back-to-tray toolbar.
+- Show remaining capacity consistently across the dashboard, tray, and provider settings by default.
+- Keep primary Settings and PopOut surfaces in the main bundle and show a recovery screen if rendering fails.
+- Restore the expected-vs-actual Pace bar in the compact tray flyout.
+- Keep local token totals while removing cost figures, model attribution, estimation notes, and cost charts from usage cards.
+- Split usage-card and tray-panel state, presentation, and native-window concerns into focused modules without changing UI behavior.
+- Include the actual minutes, hours, or days in Pace depletion warnings.
+- Prevent test-harness binaries from rewriting the user's Windows start-at-login registration.
+- Add a separately labeled weekly Pace bar alongside the existing 5-hour Pace bar.
 
 ---
 

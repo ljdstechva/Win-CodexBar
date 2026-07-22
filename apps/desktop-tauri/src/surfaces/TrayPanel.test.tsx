@@ -28,8 +28,13 @@ const tauriMocks = vi.hoisted(() => ({
   openProviderStatusPage: vi.fn(),
   getProviderChartData: vi.fn(),
   getCurrentSurfaceState: vi.fn(),
+  getProofState: vi.fn(),
   getLocaleStrings: vi.fn(),
   setUiLanguage: vi.fn(),
+  getXNotifications: vi.fn(),
+  refreshXNotifications: vi.fn(),
+  openXNotification: vi.fn(),
+  markAllXNotificationsRead: vi.fn(),
 }));
 
 const eventMocks = vi.hoisted(() => ({
@@ -54,6 +59,7 @@ vi.mock("@tauri-apps/api/event", () => eventMocks);
 vi.mock("@tauri-apps/api/window", () => windowMocks);
 
 import TrayPanel from "./TrayPanel";
+import { TRAY_SCALE_MIN } from "./tray/useTrayScale";
 import { LocaleProvider } from "../i18n/LocaleProvider";
 import { TEST_PROVIDER_CATALOG } from "../test/providerCatalog";
 import { buildBundle } from "../test/localeHarness";
@@ -89,11 +95,13 @@ function provider(id: string, displayName: string, used = 20): ProviderUsageSnap
     extraRateWindows: [],
     cost: null,
     planName: null,
+    subscriptionEndsAt: null,
     accountEmail: null,
     sourceLabel: "auto",
     updatedAt: "2026-05-24T00:00:00Z",
     error: null,
     pace: null,
+    weeklyPace: null,
     accountOrganization: null,
     trayStatusLabel: null,
     fetchDurationMs: null,
@@ -149,6 +157,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarShowResetInline: false,
     floatBarShowCost: false,
+    floatBarShowAccount: true,
     ...overrides,
   };
 }
@@ -188,6 +197,7 @@ describe("TrayPanel provider grid", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     eventMocks.listeners.clear();
+    const freshCheckedAt = new Date().toISOString();
     tauriMocks.flyoutStoredSize.mockResolvedValue(null);
     tauriMocks.refreshProviders.mockResolvedValue(undefined);
     tauriMocks.refreshProvidersIfStale.mockResolvedValue(undefined);
@@ -203,8 +213,42 @@ describe("TrayPanel provider grid", () => {
       mode: "trayPanel",
       target: { kind: "summary" },
     });
+    tauriMocks.getProofState.mockResolvedValue({
+      mode: "trayPanel",
+      target: { kind: "summary" },
+      windowRect: null,
+      trayAnchor: null,
+      workArea: null,
+      menuPath: null,
+      menuItems: [],
+      xNotificationsOpen: false,
+    });
     tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
     tauriMocks.updateSettings.mockResolvedValue(settings());
+    tauriMocks.getXNotifications.mockResolvedValue({
+      unreadCount: 0,
+      items: [],
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: freshCheckedAt,
+      lastSuccessAt: freshCheckedAt,
+      lastError: null,
+    });
+    tauriMocks.refreshXNotifications.mockResolvedValue({
+      unreadCount: 0,
+      items: [],
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: freshCheckedAt,
+      lastSuccessAt: freshCheckedAt,
+      lastError: null,
+    });
+    tauriMocks.markAllXNotificationsRead.mockResolvedValue({
+      unreadCount: 0,
+      items: [],
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: freshCheckedAt,
+      lastSuccessAt: freshCheckedAt,
+      lastError: null,
+    });
     tauriMocks.getUpdateState.mockResolvedValue({
       status: "idle",
       version: null,
@@ -235,6 +279,22 @@ describe("TrayPanel provider grid", () => {
         PanelShowFewerProviders: "Show fewer providers",
         PanelUsedSuffix: "used",
         PanelZoom: "Zoom",
+        XNotificationsLabel: "X notifications",
+        XNotificationsUnreadLabel: "X notifications, {} unread",
+        XNotificationsHeading: "X updates",
+        XNotificationsCheckNow: "Check now",
+        XNotificationsChecking: "Checking…",
+        XNotificationsMarkAllRead: "Mark all read",
+        XNotificationsCheckFailed: "X could not be checked yet.",
+        XNotificationsEmpty: "No new posts.",
+        XNotificationsPost: "Post",
+        XNotificationsReply: "Reply",
+        XNotificationsRepost: "Repost",
+        XNotificationsOpenItem: "Open {}",
+        XNotificationsChecked: "Checked {}",
+        XNotificationsNotChecked: "Not checked yet",
+        XNotificationsDelayed: "Updates may be delayed",
+        XNotificationsWarning: "X notification warning",
       }),
     );
     eventMocks.listen.mockImplementation(
@@ -315,6 +375,274 @@ describe("TrayPanel provider grid", () => {
     });
   });
 
+  it("opens the X panel automatically only when the proof state requests it", async () => {
+    tauriMocks.getProofState.mockResolvedValue({
+      mode: "trayPanel",
+      target: { kind: "summary" },
+      windowRect: null,
+      trayAnchor: null,
+      workArea: null,
+      menuPath: null,
+      menuItems: [],
+      xNotificationsOpen: true,
+    });
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+
+    expect(
+      await screen.findByRole("region", { name: "X notifications" }),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes a stale X snapshot when the notification panel opens", async () => {
+    const freshCheckedAt = new Date().toISOString();
+    tauriMocks.getXNotifications.mockResolvedValue({
+      unreadCount: 0,
+      items: [],
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: freshCheckedAt,
+      lastSuccessAt: freshCheckedAt,
+      lastError: null,
+    });
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    const bell = await screen.findByRole("button", { name: "X notifications" });
+    await act(async () => Promise.resolve());
+    expect(tauriMocks.refreshXNotifications).not.toHaveBeenCalled();
+
+    act(() => {
+      emitEvent("x-notifications-changed", {
+        unreadCount: 0,
+        items: [],
+        watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+        lastCheckedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+        lastSuccessAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+        lastError: null,
+      });
+    });
+    fireEvent.click(bell);
+
+    await waitFor(() => {
+      expect(tauriMocks.refreshXNotifications).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not refresh a fresh X snapshot when the notification panel opens", async () => {
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    const bell = await screen.findByRole("button", { name: "X notifications" });
+    await act(async () => Promise.resolve());
+
+    fireEvent.click(bell);
+    await act(async () => Promise.resolve());
+
+    expect(tauriMocks.refreshXNotifications).not.toHaveBeenCalled();
+  });
+
+  it("checks once on mount when the persisted X snapshot is stale", async () => {
+    tauriMocks.getXNotifications.mockResolvedValue({
+      unreadCount: 0,
+      items: [],
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: null,
+      lastSuccessAt: null,
+      lastError: null,
+    });
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+
+    await waitFor(() => {
+      expect(tauriMocks.refreshXNotifications).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows X notifications in the tray toolbar and opens the exact unread post", async () => {
+    const notificationSnapshot = {
+      unreadCount: 2,
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: new Date().toISOString(),
+      lastSuccessAt: new Date().toISOString(),
+      lastError: null,
+      items: [
+        {
+          id: "123456",
+          handle: "OpenAI",
+          displayName: "OpenAI",
+          text: "A new update",
+          createdAt: "2026-07-15T00:00:00Z",
+          url: "https://x.com/OpenAI/status/123456",
+          avatarUrl: null,
+          kind: "post" as const,
+        },
+      ],
+    };
+    tauriMocks.getXNotifications.mockResolvedValue(notificationSnapshot);
+    tauriMocks.openXNotification.mockResolvedValue({
+      ...notificationSnapshot,
+      unreadCount: 1,
+      items: [],
+    });
+
+    const { container } = renderTrayPanel([provider("codex", "Codex", 35)]);
+    const bell = await screen.findByRole("button", {
+      name: "X notifications, 2 unread",
+    });
+    expect(bell.closest(".menu-surface__actions")).not.toBeNull();
+    expect(container.querySelector(".floatbar__x-button")).toBeNull();
+
+    fireEvent.click(bell);
+
+    const panel = screen.getByRole("region", { name: "X notifications" });
+    expect(panel).toHaveTextContent("@thsottiaux · @OpenAI · @sama");
+    const item = screen.getByRole("button", { name: /OpenAI.*A new update/ });
+    await act(async () => {
+      fireEvent.click(item);
+      await Promise.resolve();
+    });
+
+    expect(tauriMocks.openXNotification).toHaveBeenCalledWith("123456");
+    expect(screen.queryByRole("region", { name: "X notifications" })).toBeNull();
+  });
+
+  it("shows bridge load and refresh failures instead of an empty-state success", async () => {
+    tauriMocks.getXNotifications.mockRejectedValue(new Error("load failed"));
+    tauriMocks.refreshXNotifications.mockRejectedValue(
+      new Error("refresh failed"),
+    );
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "X notifications" }),
+    );
+
+    await waitFor(() => {
+      expect(tauriMocks.refreshXNotifications).toHaveBeenCalled();
+      expect(
+        screen.getByText("X could not be checked yet."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No new posts.")).toBeNull();
+    expect(screen.getByLabelText("X notification warning")).toHaveAttribute(
+      "title",
+      "X notifications could not be refreshed.",
+    );
+  });
+
+  it("keeps action failures visible and leaves the panel open", async () => {
+    const notificationSnapshot = {
+      unreadCount: 1,
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: new Date().toISOString(),
+      lastSuccessAt: new Date().toISOString(),
+      lastError: null,
+      items: [
+        {
+          id: "123456",
+          handle: "OpenAI",
+          displayName: "OpenAI",
+          text: "A new update",
+          createdAt: "2026-07-15T00:00:00Z",
+          url: "https://x.com/OpenAI/status/123456",
+          avatarUrl: null,
+          kind: "post" as const,
+        },
+      ],
+    };
+    tauriMocks.getXNotifications.mockResolvedValue(notificationSnapshot);
+    tauriMocks.markAllXNotificationsRead.mockRejectedValue(
+      new Error("mark failed"),
+    );
+    tauriMocks.openXNotification.mockRejectedValue(new Error("open failed"));
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "X notifications, 1 unread",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("X notification warning")).toHaveAttribute(
+        "title",
+        "X notifications could not be marked read.",
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /OpenAI.*A new update/ }),
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("X notification warning")).toHaveAttribute(
+        "title",
+        "This X post could not be opened.",
+      );
+    });
+    expect(
+      screen.getByRole("region", { name: "X notifications" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps partial-source errors visible in the panel status footer", async () => {
+    const checkedAt = new Date();
+    tauriMocks.getXNotifications.mockResolvedValue({
+      unreadCount: 1,
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: checkedAt.toISOString(),
+      lastSuccessAt: new Date(checkedAt.getTime() - 20 * 60 * 1000).toISOString(),
+      lastError: "X replies request failed for @OpenAI: HTTP 429",
+      items: [
+        {
+          id: "123456",
+          handle: "OpenAI",
+          displayName: "OpenAI",
+          text: "A readable update remains visible",
+          createdAt: checkedAt.toISOString(),
+          url: "https://x.com/OpenAI/status/123456",
+          avatarUrl: null,
+          kind: "post" as const,
+        },
+      ],
+    });
+
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "X notifications, 1 unread" }),
+    );
+
+    const panel = screen.getByRole("region", { name: "X notifications" });
+    expect(panel).toHaveTextContent("A readable update remains visible");
+    expect(panel).toHaveTextContent("Updates may be delayed");
+    expect(
+      screen.getByLabelText("X notification warning"),
+    ).toHaveAttribute("title", "X replies request failed for @OpenAI: HTTP 429");
+  });
+
+  it("closes the X panel on Escape before dismissing the tray window", async () => {
+    tauriMocks.getXNotifications.mockResolvedValue({
+      unreadCount: 1,
+      watchedHandles: ["thsottiaux", "OpenAI", "sama"],
+      lastCheckedAt: new Date().toISOString(),
+      lastSuccessAt: new Date().toISOString(),
+      lastError: null,
+      items: [],
+    });
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "X notifications, 1 unread" }),
+    );
+    expect(screen.getByRole("region", { name: "X notifications" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("region", { name: "X notifications" })).toBeNull();
+    expect(tauriMocks.dismissTrayPanel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => {
+      expect(tauriMocks.dismissTrayPanel).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("localizes static tray panel labels in Japanese", async () => {
     tauriMocks.getLocaleStrings.mockResolvedValue(
       buildBundle(
@@ -327,6 +655,7 @@ describe("TrayPanel provider grid", () => {
           PanelAllProvidersShort: "すべて",
           PanelLatestTokens: "最新トークン",
           PanelThirtyDayCost: "30日間のコスト",
+          PanelThirtyDayTokens: "30日間のトークン",
           PanelTopModelPrefix: "トップモデル",
           PanelEstimatedFromLocalLogs: "ローカルログから推定",
           PanelZoom: "ズーム",
@@ -365,11 +694,12 @@ describe("TrayPanel provider grid", () => {
     expect(screen.getByText("設定...")).toBeInTheDocument();
     expect(screen.getByText("CodexBar について")).toBeInTheDocument();
     expect(screen.getByText("終了")).toBeInTheDocument();
-    expect(await screen.findByText("30日間のコスト")).toBeInTheDocument();
+    expect(await screen.findByText("30日間のトークン")).toBeInTheDocument();
     expect(container.querySelector(".menu-card__subtitle")?.textContent).toContain("日前");
     expect(screen.getByText("最新トークン")).toBeInTheDocument();
-    expect(screen.getByText("トップモデル: gpt-5.5")).toBeInTheDocument();
-    expect(screen.getByText("ローカルログから推定")).toBeInTheDocument();
+    expect(screen.queryByText("30日間のコスト")).not.toBeInTheDocument();
+    expect(screen.queryByText("トップモデル: gpt-5.5")).not.toBeInTheDocument();
+    expect(screen.queryByText("ローカルログから推定")).not.toBeInTheDocument();
   });
 
   it("localizes the expanded dense grid collapse label in Japanese", async () => {
@@ -707,7 +1037,7 @@ describe("TrayPanel provider grid", () => {
     )!;
     expect(slider).not.toBeNull();
     expect(slider.value).toBe("120");
-    expect(slider.min).toBe("100");
+    expect(slider.min).toBe(String(TRAY_SCALE_MIN));
     expect(slider.max).toBe("200");
     expect(slider.step).toBe("5");
     expect(
@@ -802,6 +1132,37 @@ describe("TrayPanel provider grid", () => {
         expect.objectContaining({ width: 328, height: 776 }),
       );
     });
+  });
+
+  it("reserves auto-fit room for the X notification overlay while it is open", async () => {
+    const setSize = vi.fn().mockResolvedValue(undefined);
+    windowMocks.getCurrentWindow.mockReturnValue({
+      setSize,
+      close: vi.fn().mockResolvedValue(undefined),
+      scaleFactor: vi.fn().mockResolvedValue(1),
+      onResized: vi.fn().mockResolvedValue(() => {}),
+      innerSize: vi.fn().mockResolvedValue({ width: 328, height: 200 }),
+    });
+
+    const { container } = renderTrayPanel([provider("codex", "Codex", 35)]);
+    const bell = await screen.findByRole("button", { name: "X notifications" });
+    await waitFor(() => {
+      expect(container.querySelector(".tray-panel-reveal--ready")).not.toBeNull();
+    });
+    setSize.mockClear();
+
+    fireEvent.click(bell);
+
+    await waitFor(() => {
+      expect(setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 328, height: 480 }),
+      );
+    });
+    expect(
+      container
+        .querySelector<HTMLElement>(".menu-surface--tray")
+        ?.style.getPropertyValue("--tray-zoom"),
+    ).toBe("1");
   });
 
   it("keeps provider detail mode tall enough for context actions and footer", async () => {

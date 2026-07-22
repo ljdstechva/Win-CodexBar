@@ -1,5 +1,6 @@
 export const TEST_PROVIDER_CATALOG: Array<[string, string]> = [
   ["codex", "Codex"],
+  ["chatgpt", "ChatGPT"],
   ["claude", "Claude"],
   ["cursor", "Cursor"],
   ["factory", "Factory"],

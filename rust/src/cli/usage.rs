@@ -419,7 +419,9 @@ pub fn render_text_with_status(
     lines.push(render_usage_header(provider, result, status, use_color));
     append_status_line(&mut lines, status);
     append_account_lines(&mut lines, &result.usage);
-    append_usage_window_lines(&mut lines, &result.usage, &metadata, use_color);
+    if !result.usage.account_only {
+        append_usage_window_lines(&mut lines, &result.usage, &metadata, use_color);
+    }
     append_cost_line(&mut lines, result.cost.as_ref());
 
     lines.join("\n")
@@ -555,6 +557,13 @@ fn append_model_specific_line(
 pub fn render_brief_text(provider: ProviderId, result: &ProviderFetchResult) -> String {
     let metadata = instantiate_provider(provider).metadata().clone();
     let usage = &result.usage;
+    if usage.account_only {
+        return format!(
+            "{}: {}",
+            provider.display_name(),
+            usage.login_method.as_deref().unwrap_or("account")
+        );
+    }
     let reset = usage
         .primary
         .format_countdown()
@@ -703,5 +712,18 @@ mod tests {
 
         assert!(output.contains("Plan:    Gemini Code Assist in Google One AI Pro"));
         assert!(!output.contains("Google One Ai Pro"));
+    }
+
+    #[test]
+    fn account_only_rendering_does_not_invent_a_quota() {
+        let result = fetch_result(UsageSnapshot::account_only().with_login_method("Pro"));
+
+        let output = render_text(ProviderId::ChatGPT, &result, false);
+        assert!(output.contains("Plan:    Pro"));
+        assert!(!output.contains("0% used"));
+        assert_eq!(
+            render_brief_text(ProviderId::ChatGPT, &result),
+            "ChatGPT: Pro"
+        );
     }
 }

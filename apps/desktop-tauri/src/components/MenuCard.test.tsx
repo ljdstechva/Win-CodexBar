@@ -65,11 +65,13 @@ function provider(
     extraRateWindows: [],
     cost: null,
     planName: null,
+    subscriptionEndsAt: null,
     accountEmail: null,
     sourceLabel: "oauth",
     updatedAt: "2026-05-24T00:00:00Z",
     error,
     pace: null,
+    weeklyPace: null,
     accountOrganization: null,
     trayStatusLabel: null,
     fetchDurationMs: null,
@@ -81,6 +83,7 @@ function renderCard(
   opts: {
     showAsUsed?: boolean;
     showResetWhenExhausted?: boolean;
+    isRefreshing?: boolean;
     onLayoutChange?: () => void;
   } = {},
 ) {
@@ -90,8 +93,9 @@ function renderCard(
         provider={snapshot}
         hideEmail={false}
         resetTimeRelative={true}
-        showAsUsed={opts.showAsUsed}
         showResetWhenExhausted={opts.showResetWhenExhausted}
+        showAsUsed={opts.showAsUsed}
+        isRefreshing={opts.isRefreshing}
         onLayoutChange={opts.onLayoutChange}
       />
     </LocaleProvider>,
@@ -104,8 +108,15 @@ describe("MenuCard", () => {
     tauriMocks.getLocaleStrings.mockResolvedValue(
       buildBundle({
         ActionCopyError: "Copy error",
+        DetailWindowExhausted: "Exhausted",
+        DetailCostTitle: "Cost",
+        DetailPaceBehind: "Behind",
         DetailPaceRunsOutIn: "Runs out in",
+        DetailPaceTitle: "Pace",
+        DetailPaceWillLastToReset: "Will last to reset",
+        PanelActual: "Actual",
         PanelEstimatedFromLocalLogs: "Estimated from local logs",
+        PanelExpected: "Expected",
         PanelLeftSuffix: "left",
         PanelNow: "now",
         PanelOneHour: "1h",
@@ -116,6 +127,8 @@ describe("MenuCard", () => {
         PanelThirtyDayTokens: "30d tokens",
         PanelTodayBudget: "today",
         PanelUsedSuffix: "used",
+        ProviderWeeklyLabel: "Weekly",
+        SubscriptionCountdownLeft: "{} left",
         ResetsInHoursMinutes: "Resets in {}h {}m",
         ResetsInMinutes: "Resets in {}m",
         WayfinderGatewayStatus: "Gateway",
@@ -137,7 +150,7 @@ describe("MenuCard", () => {
         todayCost: null,
         thirtyDayCost: 1.23,
         thirtyDayTokens: 584_000,
-        latestTokens: null,
+        latestTokens: 123_000,
         topModel: "glim-4.6",
         estimateNote: "Estimated from local logs",
         tokenCostUpdatedAtMs: 1234,
@@ -186,9 +199,11 @@ describe("MenuCard", () => {
     expect(fill?.style.width).toBe("100%");
   });
 
-  it("replaces an exhausted percentage with a future reset countdown", async () => {
+  it("replaces an exhausted percentage with a concrete future reset", async () => {
     const snapshot = provider(null, 100, { exhausted: true });
-    snapshot.primary.resetsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    snapshot.primary.resetsAt = new Date(
+      Date.now() + 60 * 60 * 1000,
+    ).toISOString();
 
     renderCard(snapshot, { showResetWhenExhausted: true });
 
@@ -197,29 +212,57 @@ describe("MenuCard", () => {
   });
 
   it("keeps an exhausted percentage without a concrete future reset", async () => {
-    renderCard(provider(null, 100, { exhausted: true, resetDescription: "in 2h" }), {
-      showResetWhenExhausted: true,
-    });
+    renderCard(provider(null, 100, {
+      exhausted: true,
+      resetDescription: "in 2h",
+    }), { showResetWhenExhausted: true });
 
     expect(await screen.findByText("0% left")).toBeInTheDocument();
   });
 
-  it("renders additional Copilot budget windows", async () => {
-    const snapshot = provider(null, 20);
-    snapshot.providerId = "copilot";
-    snapshot.displayName = "GitHub Copilot";
-    snapshot.extraRateWindows = [
-      {
-        id: "additional_budget",
-        title: "Additional Budget",
-        window: rateWindow(42),
-      },
-    ];
+  it("marks a provider card busy while that provider refreshes", async () => {
+    const { container } = renderCard(provider(null), { isRefreshing: true });
+
+    await screen.findByText("Claude");
+    expect(container.querySelector(".menu-card")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+  });
+
+  it("adds a localized future countdown and absolute tooltip to the plan badge", async () => {
+    const snapshot = provider(null);
+    snapshot.planName = "Pro";
+    snapshot.subscriptionEndsAt = new Date(
+      Date.now() + (3 * 24 + 4) * 60 * 60 * 1000,
+    ).toISOString();
 
     renderCard(snapshot);
 
-    expect(await screen.findByText("Additional Budget")).toBeInTheDocument();
-    expect(screen.getByText("58% left")).toBeInTheDocument();
+    const badge = await screen.findByText("Pro · 3d 4h left");
+    expect(badge).toHaveAttribute(
+      "title",
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(snapshot.subscriptionEndsAt)),
+    );
+  });
+
+  it("keeps a stale subscription badge plan-only", async () => {
+    const snapshot = provider(null);
+    snapshot.planName = "Pro";
+    snapshot.subscriptionEndsAt = "2020-01-01T00:00:00Z";
+
+    const { container } = renderCard(snapshot);
+
+    expect(await screen.findByText("Pro")).toBeInTheDocument();
+    expect(container.querySelector(".menu-card__plan-badge")).toHaveTextContent(
+      "Pro",
+    );
+    expect(container.querySelector(".menu-card__plan-badge")).not.toHaveTextContent(
+      "left",
+    );
   });
 
   it("renders informational metrics without quota percentages", async () => {
@@ -280,6 +323,24 @@ describe("MenuCard", () => {
     expect(screen.queryByText("Session")).not.toBeInTheDocument();
   });
 
+  it("renders additional Copilot budget windows", async () => {
+    const snapshot = provider(null, 20);
+    snapshot.providerId = "copilot";
+    snapshot.displayName = "GitHub Copilot";
+    snapshot.extraRateWindows = [
+      {
+        id: "additional_budget",
+        title: "Additional Budget",
+        window: rateWindow(42),
+      },
+    ];
+
+    renderCard(snapshot);
+
+    expect(await screen.findByText("Additional Budget")).toBeInTheDocument();
+    expect(screen.getByText("58% left")).toBeInTheDocument();
+  });
+
   it("notifies the tray panel after async local usage data loads", async () => {
     const onLayoutChange = vi.fn();
 
@@ -310,16 +371,123 @@ describe("MenuCard", () => {
     });
   });
 
-  it("renders local token and cost totals after chart data loads", async () => {
-    const { container } = renderCard(provider(null));
+  it("keeps token totals while removing every cost and model summary", async () => {
+    const snapshot = provider(null);
+    snapshot.cost = {
+      used: 9,
+      limit: 20,
+      remaining: 11,
+      currencyCode: "USD",
+      period: "month",
+      resetsAt: null,
+      formattedUsed: "$9.00",
+      formattedLimit: "$20.00",
+    };
+    const { container } = renderCard(snapshot);
 
-    expect(await screen.findByText("30d cost")).toBeInTheDocument();
+    expect(await screen.findByText("30d tokens")).toBeInTheDocument();
     expect(container.querySelector(".menu-card--with-details")).toBeInTheDocument();
     expect(container.querySelector(".menu-card--header-only")).not.toBeInTheDocument();
-    expect(screen.getAllByText("$1.23").length).toBeGreaterThan(0);
-    expect(screen.getByText("30d tokens")).toBeInTheDocument();
     expect(screen.getByText("584K")).toBeInTheDocument();
-    expect(screen.getByText("Estimated from local logs")).toBeInTheDocument();
+    expect(screen.getByText("123K")).toBeInTheDocument();
+    expect(screen.queryByText("30d cost")).not.toBeInTheDocument();
+    expect(screen.queryByText("$1.23")).not.toBeInTheDocument();
+    expect(screen.queryByText("$9.00")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cost")).not.toBeInTheDocument();
+    expect(screen.queryByText("glim-4.6")).not.toBeInTheDocument();
+    expect(screen.queryByText("Estimated from local logs")).not.toBeInTheDocument();
+    expect(container.querySelector(".menu-card__local-chart")).not.toBeInTheDocument();
+  });
+
+  it("renders the original two-track Pace bar with a 5h label", async () => {
+    const snapshot = provider(null, 55);
+    snapshot.primary = rateWindow(55, { windowMinutes: 5 * 60 });
+    snapshot.pace = {
+      stage: "behind",
+      deltaPercent: -9.5,
+      willLastToReset: true,
+      etaSeconds: null,
+      expectedUsedPercent: 44.5,
+      actualUsedPercent: 55,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    expect(await screen.findByText("5h Pace")).toBeInTheDocument();
+    expect(screen.getByText("Behind (-9.5%)")).toBeInTheDocument();
+    expect(screen.getByText(/Will last to reset/)).toBeInTheDocument();
+    const pace = container.querySelector(".menu-card__pace");
+    expect(pace).toBeInTheDocument();
+    expect(
+      pace?.querySelector<HTMLElement>(".menu-card__pace-fill--expected")
+        ?.style.width,
+    ).toBe("44.5%");
+    expect(
+      pace?.querySelector<HTMLElement>(".menu-card__pace-fill:not(.menu-card__pace-fill--expected)")
+        ?.style.width,
+    ).toBe("55%");
+  });
+
+  it("renders a distinct weekly Pace bar from the weekly snapshot", async () => {
+    const snapshot = provider(null, 55);
+    snapshot.primary = rateWindow(55, { windowMinutes: 5 * 60 });
+    snapshot.secondary = rateWindow(40, { windowMinutes: 7 * 24 * 60 });
+    snapshot.secondaryLabel = "Weekly";
+    snapshot.pace = {
+      stage: "slightly_ahead",
+      deltaPercent: 4,
+      willLastToReset: false,
+      etaSeconds: 3 * 60 * 60,
+      expectedUsedPercent: 51,
+      actualUsedPercent: 55,
+    };
+    snapshot.weeklyPace = {
+      stage: "behind",
+      deltaPercent: -10,
+      willLastToReset: true,
+      etaSeconds: null,
+      expectedUsedPercent: 50,
+      actualUsedPercent: 40,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    expect(await screen.findByText("5h Pace")).toBeInTheDocument();
+    expect(screen.getByText("Weekly Pace")).toBeInTheDocument();
+    expect(container.querySelectorAll(".menu-card__pace-window")).toHaveLength(2);
+
+    const weekly = container.querySelector('[data-pace-window="weekly"]');
+    expect(weekly).toHaveTextContent("Behind (-10.0%)");
+    expect(weekly).toHaveTextContent("Will last to reset");
+    expect(
+      weekly?.querySelector<HTMLElement>(".menu-card__pace-fill--expected")
+        ?.style.width,
+    ).toBe("50%");
+    expect(
+      weekly?.querySelector<HTMLElement>(
+        ".menu-card__pace-fill:not(.menu-card__pace-fill--expected)",
+      )?.style.width,
+    ).toBe("40%");
+  });
+
+  it("shows the time remaining before the current pace exhausts quota", async () => {
+    const snapshot = provider(null, 55);
+    snapshot.primary = rateWindow(55, { windowMinutes: 5 * 60 });
+    snapshot.pace = {
+      stage: "behind",
+      deltaPercent: -9.5,
+      willLastToReset: false,
+      etaSeconds: 3.5 * 60 * 60,
+      expectedUsedPercent: 44.5,
+      actualUsedPercent: 55,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    await screen.findByText("5h Pace");
+    expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
+      "Runs out in 4h",
+    );
   });
 
   it("shows on-pace budgets and expands projection details", async () => {

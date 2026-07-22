@@ -65,11 +65,15 @@ pub struct SettingsUpdate {
     pub float_bar_show_reset_inline: Option<bool>,
     pub float_bar_show_cost: Option<bool>,
     pub promote_tray_icon: Option<bool>,
+    pub float_bar_show_account: Option<bool>,
 }
 
 impl SettingsUpdate {
     fn refreshes_provider_data(&self) -> bool {
         self.enabled_providers.is_some()
+            || self.float_bar_enabled.is_some()
+            || self.float_bar_provider_ids.is_some()
+            || self.float_bar_show_account.is_some()
     }
 
     fn notifies_float_bar(&self) -> bool {
@@ -307,6 +311,7 @@ impl SettingsUpdate {
             dark_text: self.float_bar_dark_text,
             show_reset_inline: self.float_bar_show_reset_inline,
             show_cost: self.float_bar_show_cost,
+            show_account: self.float_bar_show_account,
         }
     }
 
@@ -451,6 +456,13 @@ mod tests {
             .refreshes_provider_data()
         );
         assert!(
+            SettingsUpdate {
+                float_bar_show_account: Some(true),
+                ..Default::default()
+            }
+            .refreshes_provider_data()
+        );
+        assert!(
             !SettingsUpdate {
                 provider_metrics: Some(Default::default()),
                 tray_icon_mode: Some("single".to_string()),
@@ -524,6 +536,13 @@ mod tests {
             ..Default::default()
         }
         .apply_display_settings(&mut settings);
-        assert_eq!(settings.tray_scale_percent, 100);
+        assert_eq!(settings.tray_scale_percent, 75);
+
+        SettingsUpdate {
+            tray_scale_percent: Some(80),
+            ..Default::default()
+        }
+        .apply_display_settings(&mut settings);
+        assert_eq!(settings.tray_scale_percent, 80);
     }
 }

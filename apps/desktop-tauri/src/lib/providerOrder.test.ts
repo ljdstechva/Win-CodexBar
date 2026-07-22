@@ -28,11 +28,13 @@ function snapshot(providerId: string, displayName: string): ProviderUsageSnapsho
     extraRateWindows: [],
     cost: null,
     planName: null,
+    subscriptionEndsAt: null,
     accountEmail: null,
     sourceLabel: "test",
     updatedAt: "2026-01-01T00:00:00Z",
     error: null,
     pace: null,
+    weeklyPace: null,
     accountOrganization: null,
     trayStatusLabel: null,
   };

@@ -58,7 +58,7 @@ pub(crate) fn build_fetch_context(
                 let cookie_header = active_token_cookie.or(stored_cookie);
                 let source_mode = if has_kimi_code_api_key && usage_source == SourceMode::Auto {
                     SourceMode::Auto
-                } else if cookie_header.is_some() {
+                } else if id == ProviderId::ChatGPT || cookie_header.is_some() {
                     SourceMode::Web
                 } else if id == ProviderId::Claude && usage_source != SourceMode::Cli {
                     SourceMode::OAuth
@@ -72,11 +72,18 @@ pub(crate) fn build_fetch_context(
                 // Try browser cookie extraction as fallback when no manual cookie is set.
                 // On non-Windows this is a harmless no-op that returns an error.
                 let cookie_header = active_token_cookie.or(stored_cookie).or_else(|| {
-                    provider_cookie_domain(id, settings).and_then(|domain| {
-                        codexbar::browser::cookies::get_cookie_header(domain)
-                            .ok()
-                            .filter(|h| !h.is_empty())
-                    })
+                    // ChatGPT owns browser-profile selection because the first
+                    // readable profile is not necessarily authenticated and can
+                    // contain an oversized cookie set. Let the provider try each
+                    // profile until it finds a usable session.
+                    (id != ProviderId::ChatGPT)
+                        .then(|| provider_cookie_domain(id, settings))
+                        .flatten()
+                        .and_then(|domain| {
+                            codexbar::browser::cookies::get_cookie_header(domain)
+                                .ok()
+                                .filter(|h| !h.is_empty())
+                        })
                 });
                 (usage_source, cookie_header)
             }
@@ -150,7 +157,9 @@ const MAX_CONTEXT_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 pub(crate) fn provider_fetch_timeout(id: ProviderId, ctx: &FetchContext) -> std::time::Duration {
     let provider_timeout = match id {
-        ProviderId::Claude | ProviderId::Codex | ProviderId::Copilot => SLOW_PROVIDER_FETCH_TIMEOUT,
+        ProviderId::ChatGPT | ProviderId::Claude | ProviderId::Codex | ProviderId::Copilot => {
+            SLOW_PROVIDER_FETCH_TIMEOUT
+        }
         _ => DEFAULT_PROVIDER_FETCH_TIMEOUT,
     };
     let context_timeout = std::time::Duration::from_secs(ctx.web_timeout.saturating_add(5));
@@ -241,7 +250,7 @@ async fn do_refresh_providers_with_policy(
     if let Ok(mut guard) = state.lock()
         && is_current_provider_refresh_generation(&guard, generation)
     {
-        prune_provider_cache_to_enabled(&mut guard.provider_cache, &inputs.enabled_ids);
+        prune_provider_cache_to_enabled(&mut guard.provider_cache, &inputs.refresh_ids);
     }
 
     events::emit_refresh_started(
@@ -298,6 +307,7 @@ fn provider_cache_can_skip_refresh(guard: &AppState, force: bool) -> bool {
 struct ProviderRefreshInputs {
     settings: Settings,
     enabled_ids: Vec<ProviderId>,
+    refresh_ids: Vec<ProviderId>,
     manual_cookies: ManualCookies,
     api_keys: ApiKeys,
     token_accounts: HashMap<ProviderId, ProviderAccountData>,
@@ -307,6 +317,7 @@ impl ProviderRefreshInputs {
     fn load() -> Self {
         let settings = Settings::load();
         let enabled_ids = settings.get_enabled_provider_ids();
+        let refresh_ids = provider_refresh_ids(&settings, &enabled_ids);
         let manual_cookies = ManualCookies::load();
         let api_keys = ApiKeys::load();
         let token_accounts = TokenAccountStore::new().load().unwrap_or_else(|e| {
@@ -317,6 +328,7 @@ impl ProviderRefreshInputs {
         Self {
             settings,
             enabled_ids,
+            refresh_ids,
             manual_cookies,
             api_keys,
             token_accounts,
@@ -324,15 +336,38 @@ impl ProviderRefreshInputs {
     }
 }
 
+fn provider_refresh_ids(settings: &Settings, enabled_ids: &[ProviderId]) -> Vec<ProviderId> {
+    let mut refresh_ids = enabled_ids.to_vec();
+    let codex_is_visible = enabled_ids.contains(&ProviderId::Codex)
+        && (settings.float_bar_provider_ids.is_empty()
+            || settings
+                .float_bar_provider_ids
+                .iter()
+                .any(|id| id == ProviderId::Codex.cli_name()));
+    let needs_chatgpt_account = settings.float_bar_enabled
+        && settings.float_bar_show_account
+        && codex_is_visible
+        && !refresh_ids.contains(&ProviderId::ChatGPT);
+
+    if needs_chatgpt_account {
+        // ChatGPT remains a typed account-only provider. Refresh it as private
+        // FloatBar enrichment without changing the user's enabled-provider list
+        // or pretending that it owns Codex quota windows.
+        refresh_ids.push(ProviderId::ChatGPT);
+    }
+
+    refresh_ids
+}
+
 fn spawn_provider_refreshes(
     app: &tauri::AppHandle,
     inputs: &ProviderRefreshInputs,
     generation: u64,
 ) -> Vec<tokio::task::JoinHandle<()>> {
-    let mut handles = Vec::with_capacity(inputs.enabled_ids.len());
+    let mut handles = Vec::with_capacity(inputs.refresh_ids.len());
     let fetch_permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROVIDER_FETCHES));
 
-    for id in &inputs.enabled_ids {
+    for id in &inputs.refresh_ids {
         let id = *id;
         let app_handle = app.clone();
         let fetch_permits = Arc::clone(&fetch_permits);
@@ -567,7 +602,7 @@ fn finish_provider_refresh(
         guard
             .provider_cache
             .iter()
-            .filter(|s| s.error.is_some())
+            .filter(|s| !s.account_only && s.error.is_some())
             .count(),
     ))
 }
@@ -597,7 +632,8 @@ fn notify_usage_thresholds(
     let cli_map = codexbar::core::cli_name_map();
     if let Ok(mut guard) = state.lock() {
         for snapshot in cached {
-            if snapshot.error.is_none()
+            if !snapshot.account_only
+                && snapshot.error.is_none()
                 && let Some(&provider) = cli_map.get(snapshot.provider_id.as_str())
             {
                 let token_account_id = token_accounts
@@ -670,9 +706,7 @@ fn dispatch_quota_hooks(
         return;
     }
     let thresholds = settings.usage_thresholds(provider, window);
-    let account = if settings.hide_personal_info {
-        None
-    } else if account.is_empty() {
+    let account = if settings.hide_personal_info || account.is_empty() {
         None
     } else {
         Some(account)
@@ -840,6 +874,47 @@ pub fn get_cached_providers(
 #[cfg(test)]
 mod predictive_warning_tests {
     use super::*;
+
+    #[test]
+    fn refreshes_chatgpt_account_when_codex_account_is_visible_on_floatbar() {
+        let settings = Settings {
+            float_bar_enabled: true,
+            float_bar_show_account: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            provider_refresh_ids(&settings, &[ProviderId::Claude, ProviderId::Codex]),
+            vec![ProviderId::Claude, ProviderId::Codex, ProviderId::ChatGPT]
+        );
+    }
+
+    #[test]
+    fn does_not_duplicate_or_fetch_hidden_chatgpt_account_unnecessarily() {
+        let mut settings = Settings {
+            float_bar_enabled: true,
+            float_bar_show_account: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            provider_refresh_ids(&settings, &[ProviderId::Codex, ProviderId::ChatGPT]),
+            vec![ProviderId::Codex, ProviderId::ChatGPT]
+        );
+
+        settings.float_bar_provider_ids = vec![ProviderId::Claude.cli_name().to_string()];
+        assert_eq!(
+            provider_refresh_ids(&settings, &[ProviderId::Claude, ProviderId::Codex]),
+            vec![ProviderId::Claude, ProviderId::Codex]
+        );
+
+        settings.float_bar_provider_ids.clear();
+        settings.float_bar_show_account = false;
+        assert_eq!(
+            provider_refresh_ids(&settings, &[ProviderId::Codex]),
+            vec![ProviderId::Codex]
+        );
+    }
 
     #[test]
     fn predictive_warning_identity_keeps_claude_sources_and_token_accounts_separate() {

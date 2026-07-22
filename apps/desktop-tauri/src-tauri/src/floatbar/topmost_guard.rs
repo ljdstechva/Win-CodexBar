@@ -1,30 +1,12 @@
-//! Keep a taskbar-overlapping floatbar above the Windows taskbar.
+//! Keep the visible FloatBar at the front of Windows' topmost band.
 //!
-//! The taskbar is itself topmost. Activating it can reorder the topmost band
-//! without clearing `WS_EX_TOPMOST` on the floatbar. While the floatbar is
-//! shown we run a short visibility-scoped timer and reassert topmost only when
-//! the bar is visible and overlaps a taskbar. Move/resize always reasserts in
-//! `floatbar::handle_window_event` (not overlap-gated).
-
-#[cfg(any(windows, test))]
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Rect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-}
-
-#[cfg(any(windows, test))]
-fn rects_overlap(a: Rect, b: Rect) -> bool {
-    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
-}
+//! Later-created topmost windows, taskbar activation, and shell/display
+//! transitions can reorder the topmost band without clearing `WS_EX_TOPMOST`.
+//! A visibility-scoped timer therefore reasserts `HWND_TOPMOST` without
+//! activation for every visible FloatBar.
 
 #[cfg(windows)]
 mod platform {
-    use super::{Rect, rects_overlap};
-    use raw_window_handle::HasWindowHandle;
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
@@ -39,9 +21,6 @@ mod platform {
     static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
     static FLOATBAR_ACTIVE: AtomicBool = AtomicBool::new(false);
     static LOOP_RUNNING: AtomicBool = AtomicBool::new(false);
-
-    static PRIMARY_CLASS: OnceLock<Vec<u16>> = OnceLock::new();
-    static SECONDARY_CLASS: OnceLock<Vec<u16>> = OnceLock::new();
 
     pub fn install(app: &tauri::AppHandle) {
         let _ = APP_HANDLE.set(app.clone());
@@ -92,76 +71,7 @@ mod platform {
         if !floatbar.is_visible().unwrap_or(false) {
             return;
         }
-        if overlaps_taskbar(&floatbar) {
-            window::apply_always_on_top(&floatbar);
-        }
-    }
-
-    fn overlaps_taskbar(window: &tauri::WebviewWindow) -> bool {
-        let Ok(handle) = window.window_handle() else {
-            return false;
-        };
-        let raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() else {
-            return false;
-        };
-
-        let mut floatbar_rect = Rect::default();
-        if unsafe { GetWindowRect(handle.hwnd.get(), &mut floatbar_rect) } == 0 {
-            return false;
-        }
-
-        taskbar_rects()
-            .into_iter()
-            .any(|taskbar_rect| rects_overlap(floatbar_rect, taskbar_rect))
-    }
-
-    fn taskbar_rects() -> Vec<Rect> {
-        let primary_class = PRIMARY_CLASS.get_or_init(|| wide("Shell_TrayWnd"));
-        let secondary_class = SECONDARY_CLASS.get_or_init(|| wide("Shell_SecondaryTrayWnd"));
-        let mut rects = Vec::new();
-
-        let primary = unsafe { FindWindowW(primary_class.as_ptr(), std::ptr::null()) };
-        push_window_rect(primary, &mut rects);
-
-        let mut previous = 0;
-        loop {
-            let taskbar =
-                unsafe { FindWindowExW(0, previous, secondary_class.as_ptr(), std::ptr::null()) };
-            if taskbar == 0 {
-                break;
-            }
-            push_window_rect(taskbar, &mut rects);
-            previous = taskbar;
-        }
-
-        rects
-    }
-
-    fn push_window_rect(hwnd: isize, rects: &mut Vec<Rect>) {
-        if hwnd == 0 || unsafe { IsWindowVisible(hwnd) } == 0 {
-            return;
-        }
-        let mut rect = Rect::default();
-        if unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
-            rects.push(rect);
-        }
-    }
-
-    fn wide(value: &str) -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn FindWindowW(class_name: *const u16, window_name: *const u16) -> isize;
-        fn FindWindowExW(
-            parent: isize,
-            child_after: isize,
-            class_name: *const u16,
-            window_name: *const u16,
-        ) -> isize;
-        fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
-        fn IsWindowVisible(hwnd: isize) -> i32;
+        window::apply_always_on_top(&floatbar);
     }
 }
 
@@ -180,36 +90,3 @@ pub fn install(_app: &tauri::AppHandle) {}
 
 #[cfg(not(windows))]
 pub fn set_active(_active: bool) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn overlap_requires_positive_area() {
-        let taskbar = Rect {
-            left: 0,
-            top: 1040,
-            right: 1920,
-            bottom: 1080,
-        };
-        assert!(rects_overlap(
-            Rect {
-                left: 800,
-                top: 1044,
-                right: 1120,
-                bottom: 1076,
-            },
-            taskbar
-        ));
-        assert!(!rects_overlap(
-            Rect {
-                left: 800,
-                top: 1000,
-                right: 1120,
-                bottom: 1040,
-            },
-            taskbar
-        ));
-    }
-}

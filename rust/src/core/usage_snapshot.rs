@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use super::RateWindow;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Provider-specific operational data reported by a Wayfinder gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WayfinderUsageSnapshot {
@@ -62,6 +66,13 @@ pub struct UsageSnapshot {
     /// Primary rate window (usually session-based, e.g., 5-hour for Claude)
     pub primary: RateWindow,
 
+    /// This provider exposes account/plan data but no quota window.
+    ///
+    /// `primary` remains present for backward compatibility with the shared
+    /// snapshot shape, but consumers must not present it when this is true.
+    #[serde(default, rename = "accountOnly", skip_serializing_if = "is_false")]
+    pub account_only: bool,
+
     /// Secondary rate window (usually weekly/monthly)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary: Option<RateWindow>,
@@ -92,6 +103,14 @@ pub struct UsageSnapshot {
     /// Login method/plan info (e.g., "Claude Pro", "Claude Max")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login_method: Option<String>,
+
+    /// Authoritative plan or prepaid-credit end time, when the provider exposes one.
+    #[serde(
+        default,
+        rename = "subscriptionEndsAt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub subscription_ends_at: Option<DateTime<Utc>>,
 }
 
 impl UsageSnapshot {
@@ -99,6 +118,7 @@ impl UsageSnapshot {
     pub fn new(primary: RateWindow) -> Self {
         Self {
             primary,
+            account_only: false,
             secondary: None,
             model_specific: None,
             tertiary: None,
@@ -107,7 +127,15 @@ impl UsageSnapshot {
             account_email: None,
             account_organization: None,
             login_method: None,
+            subscription_ends_at: None,
         }
+    }
+
+    /// Create an account-only snapshot without a displayable quota window.
+    pub fn account_only() -> Self {
+        let mut snapshot = Self::new(RateWindow::new(0.0));
+        snapshot.account_only = true;
+        snapshot
     }
 
     /// Builder pattern: set secondary window
@@ -155,6 +183,12 @@ impl UsageSnapshot {
     /// Builder pattern: set login method
     pub fn with_login_method(mut self, method: impl Into<String>) -> Self {
         self.login_method = Some(method.into());
+        self
+    }
+
+    /// Builder pattern: set an authoritative plan or prepaid-credit end time.
+    pub fn with_subscription_ends_at(mut self, ends_at: DateTime<Utc>) -> Self {
+        self.subscription_ends_at = Some(ends_at);
         self
     }
 
@@ -350,5 +384,42 @@ mod tests {
         assert_eq!(cost.limit, None);
         assert_eq!(cost.used_percent(), None);
         assert_eq!(cost.format_used(), "$0.00");
+    }
+
+    #[test]
+    fn usage_snapshot_subscription_end_is_optional_and_backward_compatible() {
+        let snapshot = UsageSnapshot::new(RateWindow::new(10.0));
+        let value = serde_json::to_value(&snapshot).expect("serialize usage snapshot");
+        assert!(value.get("subscriptionEndsAt").is_none());
+
+        let decoded: UsageSnapshot =
+            serde_json::from_value(value).expect("deserialize legacy usage snapshot");
+        assert_eq!(decoded.subscription_ends_at, None);
+
+        let ends_at = DateTime::parse_from_rfc3339("2026-07-23T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let value = serde_json::to_value(
+            UsageSnapshot::new(RateWindow::new(10.0)).with_subscription_ends_at(ends_at),
+        )
+        .expect("serialize subscription end");
+        assert_eq!(
+            value["subscriptionEndsAt"],
+            serde_json::json!("2026-07-23T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn account_only_marker_is_explicit_and_backward_compatible() {
+        let ordinary = serde_json::to_value(UsageSnapshot::new(RateWindow::new(10.0)))
+            .expect("serialize ordinary usage snapshot");
+        assert!(ordinary.get("accountOnly").is_none());
+        let decoded: UsageSnapshot =
+            serde_json::from_value(ordinary).expect("deserialize legacy usage snapshot");
+        assert!(!decoded.account_only);
+
+        let account_only =
+            serde_json::to_value(UsageSnapshot::account_only()).expect("serialize account-only");
+        assert_eq!(account_only["accountOnly"], serde_json::json!(true));
     }
 }

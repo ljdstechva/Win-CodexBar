@@ -47,6 +47,24 @@ pub struct ProviderDetail {
     pub region: Option<String>,
 }
 
+pub(crate) fn provider_detail_usage_windows(
+    snapshot: &ProviderUsageSnapshot,
+) -> (Option<RateWindowSnapshot>, Option<RateWindowSnapshot>) {
+    if snapshot.account_only {
+        return (None, None);
+    }
+
+    if snapshot.provider_id == "codex" && super::is_weekly_rate_window_snapshot(&snapshot.primary) {
+        let session = snapshot
+            .secondary
+            .clone()
+            .filter(|window| !super::is_weekly_rate_window_snapshot(window));
+        return (session, Some(snapshot.primary.clone()));
+    }
+
+    (Some(snapshot.primary.clone()), snapshot.secondary.clone())
+}
+
 pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail, String> {
     let id = parse_provider_arg(provider_id)?;
 
@@ -131,8 +149,7 @@ pub fn get_provider_detail(
         };
         detail.last_updated = Some(snapshot.updated_at.clone());
         if snapshot.error.is_none() {
-            detail.session = Some(snapshot.primary.clone());
-            detail.weekly = snapshot.secondary.clone();
+            (detail.session, detail.weekly) = provider_detail_usage_windows(&snapshot);
             detail.model_specific = snapshot.model_specific.clone();
             detail.tertiary = snapshot.tertiary.clone();
             detail.extra_rate_windows = snapshot.extra_rate_windows.clone();

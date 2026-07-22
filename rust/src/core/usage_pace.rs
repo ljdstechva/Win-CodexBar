@@ -84,13 +84,13 @@ pub struct UsagePace {
 }
 
 impl UsagePace {
-    /// Calculate weekly usage pace
+    /// Calculate usage pace for a rate window.
     ///
     /// # Arguments
     /// * `window` - The rate window to analyze
     /// * `now` - Current time (defaults to Utc::now())
     /// * `default_window_minutes` - Default window duration if not specified (10080 = 7 days)
-    pub fn weekly(
+    pub fn for_window(
         window: &RateWindow,
         now: Option<DateTime<Utc>>,
         default_window_minutes: u32,
@@ -150,6 +150,15 @@ impl UsagePace {
             eta_seconds,
             will_last_to_reset,
         })
+    }
+
+    /// Backward-compatible alias for callers that model only weekly windows.
+    pub fn weekly(
+        window: &RateWindow,
+        now: Option<DateTime<Utc>>,
+        default_window_minutes: u32,
+    ) -> Option<Self> {
+        Self::for_window(window, now, default_window_minutes)
     }
 
     /// Calculate the stage for a given delta percentage

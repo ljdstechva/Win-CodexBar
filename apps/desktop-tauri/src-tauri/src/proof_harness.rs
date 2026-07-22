@@ -14,7 +14,8 @@
 //!
 //! In proof mode the shell immediately transitions to the requested surface
 //! and suppresses blur-dismiss so the window stays visible for automated
-//! screenshot capture.
+//! screenshot capture. Set `CODEXBAR_PROOF_NO_ACTIVATE=1` when capture must
+//! remain behind the user's active window without taking keyboard focus.
 
 use std::sync::{LazyLock, Mutex};
 
@@ -48,6 +49,7 @@ pub struct ProofStatePayload {
     pub work_area: Option<ProofRect>,
     pub menu_path: Option<String>,
     pub menu_items: Vec<String>,
+    pub x_notifications_open: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -268,6 +270,36 @@ pub fn is_proof_mode(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns `true` only for an explicitly passive proof launch.
+///
+/// This is deliberately separate from ordinary proof mode: existing proof
+/// automation keeps its focus behavior unless the caller opts into the
+/// no-activate contract.
+pub fn is_no_activate_proof_mode(app: &AppHandle) -> bool {
+    is_proof_mode(app)
+        && proof_no_activate_value_is_enabled(
+            std::env::var("CODEXBAR_PROOF_NO_ACTIVATE").ok().as_deref(),
+        )
+}
+
+fn proof_no_activate_value_is_enabled(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
+fn proof_x_notifications_open_value_is_enabled(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
 pub fn capture_state(app: &AppHandle) -> Result<ProofStatePayload, String> {
     let (mode, target, tray_anchor) = {
         let st = app
@@ -301,6 +333,12 @@ pub fn capture_state(app: &AppHandle) -> Result<ProofStatePayload, String> {
         work_area: resolve_work_area(&window, tray_anchor.as_ref()),
         menu_path: menu_snapshot.menu_path,
         menu_items: menu_snapshot.menu_items,
+        x_notifications_open: is_proof_mode(app)
+            && proof_x_notifications_open_value_is_enabled(
+                std::env::var("CODEXBAR_PROOF_X_NOTIFICATIONS_OPEN")
+                    .ok()
+                    .as_deref(),
+            ),
     })
 }
 
@@ -691,6 +729,24 @@ mod tests {
             assert!(cfg.settings_tab.is_none());
             assert_eq!(cfg.surface_mode(), SurfaceMode::TrayPanel);
         });
+    }
+
+    #[test]
+    fn no_activate_proof_flag_requires_an_explicit_true_value() {
+        assert!(proof_no_activate_value_is_enabled(Some("1")));
+        assert!(proof_no_activate_value_is_enabled(Some(" TRUE ")));
+        assert!(proof_no_activate_value_is_enabled(Some("yes")));
+        assert!(!proof_no_activate_value_is_enabled(Some("0")));
+        assert!(!proof_no_activate_value_is_enabled(None));
+    }
+
+    #[test]
+    fn x_notifications_proof_flag_requires_an_explicit_true_value() {
+        assert!(proof_x_notifications_open_value_is_enabled(Some("1")));
+        assert!(proof_x_notifications_open_value_is_enabled(Some(" TRUE ")));
+        assert!(proof_x_notifications_open_value_is_enabled(Some("yes")));
+        assert!(!proof_x_notifications_open_value_is_enabled(Some("0")));
+        assert!(!proof_x_notifications_open_value_is_enabled(None));
     }
 
     #[test]

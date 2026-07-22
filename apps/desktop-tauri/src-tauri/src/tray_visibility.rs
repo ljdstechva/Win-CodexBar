@@ -84,7 +84,11 @@ pub fn is_win11_build(build: u32) -> bool {
 /// Case-insensitive path comparison after stripping trailing separators.
 /// Returns true when `entry_path` names the same executable as `exe_path`.
 pub fn matches_current_exe(entry_path: &str, exe_path: &std::path::Path) -> bool {
-    let normalize = |s: &str| s.replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase();
+    let normalize = |s: &str| {
+        s.replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
     let entry = normalize(entry_path);
     let exe = normalize(&exe_path.to_string_lossy());
     entry == exe
@@ -105,9 +109,7 @@ mod windows {
     fn current_build() -> u32 {
         use winreg::enums::*;
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        let Ok(key) = hklm.open_subkey(
-            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        ) else {
+        let Ok(key) = hklm.open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") else {
             return 0;
         };
         let Ok(build_str): Result<String, _> = key.get_value("CurrentBuild") else {
@@ -152,8 +154,8 @@ mod windows {
         let Ok(settings_key) = hkcu.open_subkey_with_flags(NOTIFY_ICON_SETTINGS, KEY_READ) else {
             return Ok(PromotionState::EntryNotFound);
         };
-        let Some(subkey) = find_own_subkey(&settings_key, &exe_path)
-            .map_err(TrayVisibilityError::Registry)?
+        let Some(subkey) =
+            find_own_subkey(&settings_key, &exe_path).map_err(TrayVisibilityError::Registry)?
         else {
             return Ok(PromotionState::EntryNotFound);
         };
@@ -171,12 +173,13 @@ mod windows {
         }
         let exe_path = std::env::current_exe().map_err(TrayVisibilityError::ExePathUnresolvable)?;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let Ok(settings_key) = hkcu.open_subkey_with_flags(NOTIFY_ICON_SETTINGS, KEY_READ | KEY_WRITE)
+        let Ok(settings_key) =
+            hkcu.open_subkey_with_flags(NOTIFY_ICON_SETTINGS, KEY_READ | KEY_WRITE)
         else {
             return Ok(PromotionState::EntryNotFound);
         };
-        let Some(subkey) = find_own_subkey(&settings_key, &exe_path)
-            .map_err(TrayVisibilityError::Registry)?
+        let Some(subkey) =
+            find_own_subkey(&settings_key, &exe_path).map_err(TrayVisibilityError::Registry)?
         else {
             return Ok(PromotionState::EntryNotFound);
         };
@@ -209,10 +212,10 @@ mod non_windows {
     }
 }
 
-#[cfg(target_os = "windows")]
-use windows as platform;
 #[cfg(not(target_os = "windows"))]
 use non_windows as platform;
+#[cfg(target_os = "windows")]
+use windows as platform;
 
 pub fn support_status() -> TrayVisibilitySupport {
     platform::support_status()

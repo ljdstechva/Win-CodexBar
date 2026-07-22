@@ -19,6 +19,7 @@ mod tray_bridge;
 mod tray_menu;
 mod tray_visibility;
 mod window_positioner;
+mod x_notifications;
 
 use std::sync::Mutex;
 
@@ -114,7 +115,14 @@ fn main() {
     let proof_config = proof_harness::ProofConfig::from_env();
     let is_proof_mode = proof_config.is_some();
     let force_start_visible = std::env::var_os("CODEXBAR_START_VISIBLE").is_some();
-    let settings = codexbar::settings::Settings::load();
+    let mut settings = codexbar::settings::Settings::load();
+    if settings.auto_download_updates || settings.install_updates_on_quit {
+        settings.auto_download_updates = false;
+        settings.install_updates_on_quit = false;
+        if let Err(error) = settings.save() {
+            tracing::warn!("Could not disable legacy automatic-update settings: {error}");
+        }
+    }
     let launch = launch_behavior(
         force_start_visible,
         settings.start_minimized,
@@ -126,6 +134,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(Mutex::new(initial_state))
+        .manage(x_notifications::XNotificationState::load())
         .plugin(shortcut_bridge::plugin())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if should_reopen_primary_window_from_instance_args(args.iter().skip(1)) {
@@ -160,12 +169,6 @@ fn main() {
             commands::get_cached_providers,
             commands::get_safe_diagnostics,
             commands::get_credential_storage_status,
-            commands::get_update_state,
-            commands::check_for_updates,
-            commands::download_update,
-            commands::apply_update,
-            commands::dismiss_update,
-            commands::open_release_page,
             commands::get_api_keys,
             commands::get_api_key_providers,
             commands::set_api_key,
@@ -223,8 +226,13 @@ fn main() {
             floatbar::hide_float_bar,
             floatbar::set_float_bar_opacity,
             floatbar::set_float_bar_click_through,
+            floatbar::is_cursor_over_float_bar,
             floatbar::resize_float_bar,
             floatbar::set_float_bar_orientation,
+            x_notifications::get_x_notifications,
+            x_notifications::refresh_x_notifications,
+            x_notifications::open_x_notification,
+            x_notifications::mark_all_x_notifications_read,
         ])
         .setup(move |app| {
             if let Some(window) = app.get_webview_window("main") {
@@ -234,6 +242,7 @@ fn main() {
             tray_bridge::setup(app)?;
             shortcut_bridge::register(app.handle());
             floatbar::install(app.handle());
+            x_notifications::install(app.handle().clone());
             auto_refresh::install(app.handle().clone());
             if settings.powertoys_status_pipe_enabled {
                 powertoys::install(app.handle().clone());

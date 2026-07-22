@@ -2,7 +2,7 @@
 //!
 //! These are thin wrappers around the local `window` module. User-initiated
 //! changes keep persisted settings in sync, while the resize command applies a
-//! new size and the native interaction state together.
+//! new size and restores the persisted click-through state.
 
 use codexbar::settings::{Settings, clamp_float_bar_opacity, normalize_float_bar_orientation};
 use tauri::{AppHandle, Manager};
@@ -59,6 +59,14 @@ pub fn set_float_bar_click_through(app: AppHandle, enabled: bool) -> Result<(), 
         floatbar_window::apply_always_on_top(&window);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn is_cursor_over_float_bar(app: AppHandle) -> Result<bool, String> {
+    let Some(window) = app.get_webview_window(floatbar_window::FLOATBAR_LABEL) else {
+        return Ok(false);
+    };
+    floatbar_window::cursor_inside(&window)
 }
 
 #[tauri::command]

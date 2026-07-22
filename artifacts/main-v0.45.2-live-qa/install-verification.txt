@@ -1,0 +1,81 @@
+Win-CodexBar v0.45.2 installed/live QA
+Verified: 2026-07-22 18:49 +08:00 (Asia/Singapore)
+
+Release executable:
+  D:\02 systems\01 codex\Win-CodexBar\target\release\codexbar-desktop-tauri.exe
+  Product version: 0.45.2
+  SHA-256: 893AB381C973521CE13C0C78D6BA518EC9983C8766F7EC0EBC823D08A30B4855
+  Authenticode: not signed
+
+Installed executable:
+  C:\Users\USER\AppData\Local\Programs\CodexBar\codexbar.exe
+  Product version: 0.45.2
+  SHA-256: 893AB381C973521CE13C0C78D6BA518EC9983C8766F7EC0EBC823D08A30B4855
+  Hash matches release: yes
+  Final installed PID: 27092
+  Startup health check: remained running
+
+NSIS installer:
+  D:\02 systems\01 codex\Win-CodexBar\installer\CodexBar Desktop_0.45.2_x64-setup.exe
+  SHA-256: 39B1676DE6BB234AE623AD49946D51BF860BE26A3F9C28FA50564D9F3C1CE1B1
+  Authenticode: not signed
+  Deployment note: the verified standalone Tauri executable was copied directly because the silent same-version NSIS upgrade left the existing customized executable unchanged.
+
+Settings preservation:
+  C:\Users\USER\AppData\Roaming\CodexBar\settings.json
+  Pre-install SHA-256: 532551F86DF54DA968174A29281B124A9A2E6D8099135E571F61F9D1C9C76BCA
+  Final SHA-256: 532551F86DF54DA968174A29281B124A9A2E6D8099135E571F61F9D1C9C76BCA
+  Restored/preserved byte-for-byte: yes
+  Rollback backup: C:\Users\USER\.codex\scratch\Win-CodexBar-install-rollback-20260722-1812
+
+Authenticated provider verification:
+  ChatGPT live entitlement test: passed
+  Matched account-only plan: ChatGPT Pro
+  Future entitlement boundary: 2026-07-23T01:52:39Z
+  Claude live subscription test: passed while the authenticated desktop cookie store was readable
+  Claude live same-organization Web test: passed
+  Matched exact-organization plan: Claude Max 5x
+  Genuine future billing boundary: 2026-08-18T04:29:10Z
+  Token/JWT/quota reset timestamps are not accepted as subscription expiry
+
+Installed visual proof:
+  Codex informational/unavailable 5h lane renders as an em dash, not a fabricated percentage
+  FloatBar: ChatGPT Pro + 15h 3m left; Claude Max 5x + 26d 17h left
+  ChatGPT account pill uses the OpenAI/Codex mark
+  Capacity values, reset times, and Claude FA remain visible
+  No Pace pill or signed Pace percentage appears on the FloatBar
+  Tray: ChatGPT Pro + 15h 4m left; Claude Max 5x + 26d 17h left
+  X panel watched handles: @thsottiaux, @OpenAI, @sama
+  X panel live result: No new posts; checked in 7 seconds
+
+Screenshot hashes:
+  floatbar-vertical-live.jpg: 2CD2313DC101C15F5624C969398A5CA1022288643D64C55D2B59E85C72560B47
+  tray-subscriptions-live.jpg: C017D347EE527E072AF61F8A0101F356DC65AA110934E4D15C7117C5A1691AD8
+  x-notifications-live.jpg: 68F1796E60F4E417ECB98254707A645AA2EDFD4F6F74581D69416F9A820B1290
+
+Automated verification:
+  cargo test --manifest-path rust/Cargo.toml: 789 passed, 5 ignored; CLI 1 passed
+  cargo test --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml: 372 passed
+  pnpm test: 235 passed
+  focused FloatBar/tray frontend regressions: 80 passed
+  focused X notification backend regressions: 14 passed
+  cargo clippy --all-targets -- -D warnings: passed for both Rust manifests
+  cargo fmt --all -- --check: passed
+  pnpm run build: passed
+  pnpm run check-locale: 726 keys matched
+  pnpm exec tauri build: passed; MSI and NSIS bundles produced
+  ChatGPT entitlement ignored live test: passed
+  Claude subscription and direct-Web ignored live tests: passed
+  X profiles/posts/replies ignored live tests: passed
+  Supervisor final audit: APPROVED
+
+Regression coverage added:
+  Informational, unknown-duration, daily, and monthly windows cannot be relabeled as 5h or 7d
+  Provider-error unavailable lanes remain red while truthful non-error unavailable lanes remain gray
+  X load, subscribe, refresh, open, and mark-all command failures are visible and sanitized
+  Failed mark-all persistence restores the in-memory unread list
+
+Final desktop state:
+  Installed CodexBar 0.45.2 running normally
+  Claude Desktop restored and running
+  Original settings hash unchanged

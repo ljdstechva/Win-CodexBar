@@ -5,6 +5,8 @@
   `rust/` remains the shared backend/domain crate and standalone CLI.
 - Many files in `docs/` and some workflows reference the upstream macOS/Swift project. Treat those as historical or
   upstream-sync material unless the task is explicitly about upstream parity.
+- `PRODUCT.md` defines the product register and `DESIGN.md` plus `.impeccable/design.json` define the current UI/design
+  system; use them as the starting point for future surface changes.
 - When repo docs conflict, trust the active Tauri desktop sources in `apps/desktop-tauri` plus the shared Rust sources
   in `rust/src`.
 
@@ -22,7 +24,10 @@
 
 ## Build, Test, Run
 - Default desktop work runs from the repo root; `cd rust` is for backend/CLI-only tasks.
-- Build the desktop shell (preferred): `cd apps/desktop-tauri && npm run tauri:build` (or `tauri:build:debug`).
+- This workspace keeps its approved Rust toolchain outside the repository at `D:\02 systems\01 codex\.tooling`.
+  Set `CARGO_HOME` to `.tooling\cargo`, `RUSTUP_HOME` to `.tooling\rustup`, and prepend `.tooling\cargo\bin`
+  for native build and test commands; do not add this toolchain to the user or system `PATH`.
+- Build the desktop shell (preferred): `cd apps/desktop-tauri && pnpm run tauri:build` (or `tauri:build:debug`).
   Raw `cargo build --release` on the Tauri crate produces an exe that still points at the dev URL.
 - Build the CLI: `cargo build -p codexbar`.
 - Test: `cargo test --manifest-path rust/Cargo.toml` and
@@ -81,4 +86,49 @@
 - Claude CLI output is user-configurable; do not depend on a customizable status line for usage parsing.
 - Cookie import UX uses explicit browser selection in Preferences. Do not assume Chrome-only in general UI flows.
 - Be conservative with secret handling (manual cookies, API keys, token accounts); use existing redaction/storage helpers.
+- Usage cards intentionally show remaining quota, local token totals, and separate 5-hour/weekly Pace bars when
+  both windows provide timing; do not reintroduce cost figures, top-model attribution, local-estimate notes, or
+  cost charts without a new user requirement.
+- Tray icon fill and percent text follow the selected used/remaining display mode, but their severity color always
+  derives from actual percent used: a full remaining quota is green and a nearly exhausted quota is red.
+- Settings keeps the accepted five-tab shell (`General`, `Providers`, `Display`, `Advanced`, `About`): use 496 px for
+  ordinary tabs and 600 px for Providers. Fold notifications and thresholds into General, and tray/menu/FloatBar
+  controls into Display; preserve aliases for the superseded 0.42 tab routes.
+- FloatBar remains a native always-on-top, no-activate overlay. On Windows, keep a focus-safe native watchdog that
+  periodically reasserts the FloatBar at the front of the topmost z-order band so later topmost windows and shell or
+  display transitions cannot leave it behind. FloatBar uses a high-contrast dark treatment and always displays remaining capacity independently of menu/detail
+  display mode. Classify `5h`/`7d` by actual window duration; render an unavailable window as `—` instead of relabeling
+  weekly data or fabricating 0%. Color each available quota independently: 50% or more green, below 50% yellow, below
+  30% orange, below 10% red. Its optional non-interactive account pill shows only the provider's plan type and a
+  countdown from a genuine future subscription end date; when a plan exists without an authoritative future date,
+  show the localized `expiry unavailable` fallback instead of silently showing only the plan. Keep ChatGPT entitlement
+  data in its account-only provider and presentation-anchor exactly one ChatGPT account pill after Codex capacity;
+  never show email, cost, or inferred expiry data. When Claude supplies its scoped `Fable only` quota, append its remaining percentage as
+  `FA` in the capacity pill and show that quota's own reset icon/time when supplied; never fabricate either value, borrow
+  another window's reset, or add it to another provider. FloatBar never renders Pace pills or signed Pace percentages;
+  Pace remains available in the tray dashboard, pop-out dashboard, provider details, history, and predictive warnings.
+  Right-align all vertical pills. While click-through is enabled, omit the drag grip and use native cursor bounds detection to
+  fade the bar to 10% opacity without removing its input-transparent Windows style.
+- Use `CODEXBAR_PROOF_NO_ACTIVATE=1` only with `CODEXBAR_PROOF_MODE` for passive live capture; it must apply the native
+  no-activate style before showing a proof surface and must not alter ordinary window-focus behavior. With a tray-panel
+  proof, `CODEXBAR_PROOF_X_NOTIFICATIONS_OPEN=1` may open the X panel for capture and must have no effect outside proof mode.
+- Keep automatic update download and install-on-quit disabled on the locally customized installed build. Manual
+  upstream updates require re-porting and re-verifying these UI contracts before installation. Do not expose check,
+  download, install, or retry update controls; Settings links to `https://github.com/steipete/CodexBar` for watching.
+- The tray-opened CodexBar dashboard owns the persisted X watchlist for `@thsottiaux`, `@OpenAI`, and `@sama`;
+  never render its bell or list on the FloatBar. Poll the public profile and official X syndication payloads so authored
+  posts, replies, and reposts are all discoverable; use `/with_replies` and local browser cookies only as fallbacks,
+  and never log or persist cookie headers. Maintain a timestamped rolling seven-day notified ledger: every discovered
+  item inside that window that is absent from the ledger becomes unread exactly once, and older ledger/unread entries
+  are pruned. Legacy untimestamped seen IDs must not suppress missed notifications. Open unread items at their exact X
+  status URL.
+- Keep `MenuCard.tsx` and `TrayPanel.tsx` as composition roots. Pure display derivation, bridge loading, provider-view
+  state, and native window behavior belong in their focused modules under the indexed child boundaries.
+- Native tests must not rewrite the user's real startup registration. Start-at-login repair may run only from a
+  recognized shipped CodexBar executable name.
 - Prefer Windows-native validation for tray/DPAPI/browser-cookie behavior; WSL/Linux can be insufficient for those paths.
+
+## Child DOX Index
+- `apps/desktop-tauri/src/components/menu-card/AGENTS.md` — usage-card presentation and data-loading contracts.
+- `apps/desktop-tauri/src/surfaces/tray/AGENTS.md` — tray state, controls, and native-window lifecycle contracts.
+- `apps/desktop-tauri/src/floatbar/AGENTS.md` — detached FloatBar presentation, native lifecycle, and Windows overlay contracts.

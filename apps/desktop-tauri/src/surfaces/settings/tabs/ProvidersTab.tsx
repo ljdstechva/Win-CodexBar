@@ -15,6 +15,7 @@ import {
 import { ProviderDetailPane } from "../providers/ProviderDetailPane";
 import { reorderProviders } from "../../../lib/tauri";
 import { useProviders } from "../../../hooks/useProviders";
+import { displayUsagePercent } from "../../../lib/usageDisplay";
 
 interface ProvidersTabProps {
   settings: BootstrapState["settings"];
@@ -71,10 +72,10 @@ export default function ProvidersTab({
         enabled: isOn,
         status: deriveProviderStatus(isOn, snap),
         subtitlePrimary: providerSidebarSubtitle(p.id, isOn, snap, t),
-        subtitleSecondary: providerSidebarMetric(snap),
+        subtitleSecondary: providerSidebarMetric(snap, settings.showAsUsed, t),
       };
     });
-  }, [enabled, orderedProviders, snapshots, t]);
+  }, [enabled, orderedProviders, settings.showAsUsed, snapshots, t]);
 
   const normalizedSearch = searchText.trim().toLowerCase();
   const visibleRows = useMemo(
@@ -136,6 +137,7 @@ export default function ProvidersTab({
         providerId={selectedId}
         cookieDomain={selectedEntry?.cookieDomain ?? null}
         resetTimeRelative={settings.resetTimeRelative}
+        showAsUsed={settings.showAsUsed}
         providerMetrics={settings.providerMetrics}
         wayfinderGatewayUrl={settings.wayfinderGatewayUrl ?? "http://127.0.0.1:8088"}
         settingsDisabled={saving}
@@ -254,14 +256,17 @@ function providerSourceHintShort(
   }
 }
 
-function providerSidebarMetric(
+export function providerSidebarMetric(
   snap: ProviderUsageSnapshot | null,
+  showAsUsed: boolean,
+  t: (key: LocaleKey) => string,
 ): string | undefined {
-  if (!snap) return undefined;
+  if (!snap || snap.accountOnly) return undefined;
   const rate = snap.primary;
   if (!rate) return undefined;
-  if (Number.isFinite(rate.usedPercent)) {
-    return `${Math.round(Math.max(0, rate.usedPercent))}%`;
+  if (Number.isFinite(rate.usedPercent) || Number.isFinite(rate.remainingPercent)) {
+    const label = showAsUsed ? t("PanelUsedSuffix") : t("PanelLeftSuffix");
+    return `${Math.round(displayUsagePercent(rate, showAsUsed))}% ${label}`;
   }
   return undefined;
 }

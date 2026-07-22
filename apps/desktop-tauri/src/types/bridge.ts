@@ -3,10 +3,7 @@ export type VisibleSurfaceMode = Exclude<SurfaceMode, "hidden">;
 export type SettingsTabId =
   | "general"
   | "providers"
-  | "notifications"
-  | "menuBar"
-  | "menu"
-  | "usageSpend"
+  | "display"
   | "advanced"
   | "about";
 
@@ -57,6 +54,7 @@ export interface TrayVisibilityStatusDto {
 }
 export type ProofProviderId =
   | "codex"
+  | "chatgpt"
   | "claude"
   | "cursor"
   | "factory"
@@ -196,6 +194,7 @@ export interface ProofStatePayload {
   workArea: ProofRect | null;
   menuPath: string | null;
   menuItems: string[];
+  xNotificationsOpen: boolean;
 }
 
 export type ProofCommand =
@@ -265,7 +264,7 @@ export interface SettingsSnapshot {
   theme: ThemePreference;
   /** 100..=250 — clamped server-side. */
   windowScalePercent: number;
-  /** 100..=200 — clamped server-side. */
+  /** 75..=200 — clamped server-side. */
   trayScalePercent: number;
   powertoysStatusPipeEnabled: boolean;
   claudeAvoidKeychainPrompts: boolean;
@@ -291,6 +290,8 @@ export interface SettingsSnapshot {
   floatBarShowCost: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
   promoteTrayIcon?: boolean;
+  /** When true, render provider plan and genuine subscription-expiry data. */
+  floatBarShowAccount: boolean;
 }
 
 /** Partial settings object — only include fields you want to change. */
@@ -352,6 +353,7 @@ export interface SettingsUpdate {
   floatBarShowResetInline?: boolean;
   floatBarShowCost?: boolean;
   promoteTrayIcon?: boolean;
+  floatBarShowAccount?: boolean;
 }
 
 export interface UsageThresholdOverride {
@@ -419,6 +421,7 @@ export interface ProviderUsageSnapshot {
   providerId: string;
   displayName: string;
   primary: RateWindowSnapshot;
+  accountOnly?: boolean;
   primaryLabel?: string;
   secondary: RateWindowSnapshot | null;
   secondaryLabel?: string;
@@ -431,11 +434,13 @@ export interface ProviderUsageSnapshot {
   }>;
   cost: CostSnapshotBridge | null;
   planName: string | null;
+  subscriptionEndsAt: string | null;
   accountEmail: string | null;
   sourceLabel: string;
   updatedAt: string;
   error: string | null;
   pace: PaceSnapshot | null;
+  weeklyPace: PaceSnapshot | null;
   accountOrganization: string | null;
   trayStatusLabel: string | null;
   fetchDurationMs?: number | null;
@@ -499,25 +504,26 @@ export interface CredentialStorageStatus {
 
 // ── Update state types ───────────────────────────────────────────────
 
-export type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "ready"
-  | "error";
+export type XPostKind = "post" | "reply" | "repost";
 
-export interface UpdateStatePayload {
-  status: UpdateStatus;
-  version: string | null;
-  error: string | null;
-  progress: number | null;
-  releaseUrl: string | null;
-  canDownload: boolean;
-  canApply: boolean;
-  /** Unix-ms timestamp of the last completed update check, or `null`
-   *  if the app has not checked during this session. */
-  lastCheckedAt: number | null;
+export interface XNotificationItem {
+  id: string;
+  handle: string;
+  displayName: string;
+  text: string;
+  createdAt: string;
+  url: string;
+  avatarUrl: string | null;
+  kind: XPostKind;
+}
+
+export interface XNotificationSnapshot {
+  unreadCount: number;
+  items: XNotificationItem[];
+  watchedHandles: string[];
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
 }
 
 // ── Credential store types ───────────────────────────────────────────

@@ -24,7 +24,6 @@ import type {
   SurfaceMode,
   SurfaceTargetForMode,
   VisibleSurfaceMode,
-  UpdateStatePayload,
   CookieSourceOption,
   RegionOption,
   SafeDiagnostics,
@@ -35,6 +34,7 @@ import type {
   SessionFocusResult,
   TrayVisibilityStatusDto,
   UsageSpendSummary,
+  XNotificationSnapshot,
 } from "../types/bridge";
 
 export function getBootstrapState(): Promise<BootstrapState> {
@@ -145,32 +145,24 @@ export function getCredentialStorageStatus(): Promise<CredentialStorageStatus> {
   return invoke<CredentialStorageStatus>("get_credential_storage_status");
 }
 
-export function getUpdateState(): Promise<UpdateStatePayload> {
-  return invoke<UpdateStatePayload>("get_update_state");
-}
-
-export function checkForUpdates(): Promise<UpdateStatePayload> {
-  return invoke<UpdateStatePayload>("check_for_updates");
-}
-
-export function downloadUpdate(): Promise<UpdateStatePayload> {
-  return invoke<UpdateStatePayload>("download_update");
-}
-
-export function applyUpdate(): Promise<void> {
-  return invoke<void>("apply_update");
-}
-
-export function dismissUpdate(): Promise<UpdateStatePayload> {
-  return invoke<UpdateStatePayload>("dismiss_update");
-}
-
-export function openReleasePage(): Promise<void> {
-  return invoke<void>("open_release_page");
-}
-
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
+}
+
+export function getXNotifications(): Promise<XNotificationSnapshot> {
+  return invoke<XNotificationSnapshot>("get_x_notifications");
+}
+
+export function refreshXNotifications(): Promise<XNotificationSnapshot> {
+  return invoke<XNotificationSnapshot>("refresh_x_notifications");
+}
+
+export function openXNotification(id: string): Promise<XNotificationSnapshot> {
+  return invoke<XNotificationSnapshot>("open_x_notification", { id });
+}
+
+export function markAllXNotificationsRead(): Promise<XNotificationSnapshot> {
+  return invoke<XNotificationSnapshot>("mark_all_x_notifications_read");
 }
 
 // ── Credential store bridge ──────────────────────────────────────────

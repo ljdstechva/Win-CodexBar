@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useLocale } from "../../../hooks/useLocale";
-import { useUpdateState } from "../../../hooks/useUpdateState";
 import { getAppInfo, openExternalUrl } from "../../../lib/tauri";
-import { Field, Select, Toggle } from "../../../components/FormControls";
-import type { AppInfoBridge, UpdateChannel } from "../../../types/bridge";
+import type { AppInfoBridge } from "../../../types/bridge";
 import type { LocaleKey } from "../../../i18n/keys";
 import type { TabProps } from "../../Settings";
 import codexbarIcon from "../../../assets/codexbar-icon.png";
+
+const UPSTREAM_REPOSITORY = "https://github.com/steipete/CodexBar";
 
 const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
   {
@@ -19,26 +19,18 @@ const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
   },
   {
     labelKey: "AboutLinkOriginalProject",
-    url: "https://github.com/steipete/CodexBar",
+    url: UPSTREAM_REPOSITORY,
   },
 ];
 
-export default function AboutTab({ settings, set, saving }: TabProps) {
+export default function AboutTab(_props: TabProps) {
   const { t } = useLocale();
   const [appInfo, setAppInfo] = useState<AppInfoBridge | null>(null);
-  const { updateState, checkNow, download, apply, openRelease } =
-    useUpdateState();
-  const [hasChecked, setHasChecked] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     void getAppInfo().then(setAppInfo);
   }, []);
-
-  const handleCheck = () => {
-    setHasChecked(true);
-    checkNow();
-  };
 
   const openAboutLink = (url: string) => {
     setLinkError(null);
@@ -55,15 +47,10 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
     );
   }
 
-  const isBusy =
-    updateState.status === "checking" ||
-    updateState.status === "downloading";
-
   // Copyright is split into two keys so the brand link can render inline
   // between them, avoiding any Fluent placeholder syntax.
   const copyrightBefore = t("AboutCopyrightBefore");
   const copyrightAfter = t("AboutCopyrightAfter");
-
   return (
     <section className="settings-section about-section">
       <div className="about-header">
@@ -98,106 +85,20 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
 
       <div className="about-divider" />
 
-      <div className="about-update-controls">
-        <Field
-          label={t("AutoDownloadUpdates")}
-          description={t("AutoDownloadUpdatesHelper")}
-          leading
-        >
-          <Toggle
-            checked={settings.autoDownloadUpdates}
-            disabled={saving}
-            onChange={(v) => set({ autoDownloadUpdates: v })}
-          />
-        </Field>
-
-        <div className="about-channel-row">
-          <Field label={t("UpdateChannelChoice")}>
-            <Select
-              value={settings.updateChannel}
-              disabled={saving}
-              options={[
-                { value: "stable", label: t("UpdateChannelStableOption") },
-                { value: "beta", label: t("UpdateChannelBetaOption") },
-              ]}
-              onChange={(v) => set({ updateChannel: v as UpdateChannel })}
-            />
-          </Field>
-          <p className="about-channel-description">
-            {t("UpdateChannelChoiceHelper")}
-          </p>
-        </div>
-      </div>
-
       <div className="about-actions">
-        <button
-          className="credential-btn credential-btn--primary"
-          disabled={isBusy}
-          onClick={handleCheck}
-        >
-          {updateState.status === "checking"
-            ? t("AboutChecking")
-            : t("AboutCheckForUpdates")}
-        </button>
-
-        {updateState.status === "available" && (
-          <div className="about-update-row">
-            <span className="about-update-msg">
-              {t("UpdateAvailableMessage").replace(
-                "{}",
-                updateState.version ?? "",
-              )}
-            </span>
-            {updateState.canDownload ? (
-              <button
-                className="credential-btn credential-btn--primary"
-                onClick={download}
-              >
-                {t("BannerDownloadButton")}
-              </button>
-            ) : (
-              <button className="credential-btn" onClick={openRelease}>
-                {t("BannerViewRelease")}
-              </button>
-            )}
-          </div>
-        )}
-
-        {updateState.status === "downloading" && (
+        <div className="about-update-row">
           <span className="about-update-msg">
-            {t("UpdateDownloading")}
-            {updateState.progress != null &&
-              ` ${Math.round(updateState.progress * 100)}%`}
+            Automatic downloads are disabled for this customized Windows build. Watch the
+            original repository and re-port updates only after reviewing them.
           </span>
-        )}
-
-        {updateState.status === "ready" && (
-          <div className="about-update-row">
-            <span className="about-update-msg">{t("UpdateReady")}</span>
-            {updateState.canApply ? (
-              <button
-                className="credential-btn credential-btn--primary"
-                onClick={apply}
-              >
-                {t("BannerInstallRestart")}
-              </button>
-            ) : (
-              <button className="credential-btn" onClick={openRelease}>
-                {t("BannerViewRelease")}
-              </button>
-            )}
-          </div>
-        )}
-
-        {updateState.status === "error" && (
-          <span className="about-update-msg">
-            {t("ErrorPrefix")} {updateState.error}
-          </span>
-        )}
-
-        {updateState.status === "idle" && hasChecked && (
-          <span className="about-update-msg">{t("AboutUpToDate")}</span>
-        )}
+          <button
+            type="button"
+            className="credential-btn credential-btn--primary"
+            onClick={() => openAboutLink(UPSTREAM_REPOSITORY)}
+          >
+            Watch steipete/CodexBar on GitHub
+          </button>
+        </div>
       </div>
 
       <p className="about-copyright">
@@ -205,7 +106,7 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
         <button
           type="button"
           className="about-link about-link--inline"
-          onClick={() => openAboutLink("https://github.com/steipete/CodexBar")}
+          onClick={() => openAboutLink(UPSTREAM_REPOSITORY)}
         >
           {t("AppName")}
         </button>

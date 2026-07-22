@@ -47,6 +47,7 @@ interface Props {
   providerId: string | null;
   cookieDomain?: string | null;
   resetTimeRelative: boolean;
+  showAsUsed: boolean;
   providerMetrics: SettingsSnapshot["providerMetrics"];
   wayfinderGatewayUrl: string;
   settingsDisabled: boolean;
@@ -67,6 +68,7 @@ export function ProviderDetailPane({
   providerId,
   cookieDomain = null,
   resetTimeRelative,
+  showAsUsed,
   providerMetrics,
   wayfinderGatewayUrl,
   settingsDisabled,
@@ -295,14 +297,16 @@ export function ProviderDetailPane({
       <UsageSection
         provider={detail}
         resetTimeRelative={resetTimeRelative}
+        showAsUsed={showAsUsed}
         t={t}
       />
       {detail.id === "wayfinder" && (
-        <section className="provider-detail__section">
-          <h3>{t("WayfinderGatewayTitle")}</h3>
-          <label>
+        <section className="provider-detail-section provider-detail-wayfinder">
+          <h4>{t("WayfinderGatewayTitle")}</h4>
+          <label className="provider-detail-wayfinder__field">
             <span>{t("WayfinderGatewayLabel")}</span>
             <input
+              className="text-input"
               type="url"
               value={gatewayDraft}
               disabled={settingsDisabled || busy}
@@ -310,11 +314,24 @@ export function ProviderDetailPane({
               aria-describedby="wayfinder-gateway-help"
             />
           </label>
-          <p id="wayfinder-gateway-help">{t("WayfinderGatewayHelp")}</p>
-          {gatewayError && <p role="alert">{gatewayError}</p>}
-          <button type="button" disabled={settingsDisabled || busy} onClick={() => void saveGateway()}>
-            {t("Save")}
-          </button>
+          <p className="provider-detail-wayfinder__help" id="wayfinder-gateway-help">
+            {t("WayfinderGatewayHelp")}
+          </p>
+          {gatewayError && (
+            <p className="provider-detail-error" role="alert">
+              {gatewayError}
+            </p>
+          )}
+          <div className="provider-detail-actions">
+            <button
+              className="credential-btn credential-btn--primary"
+              type="button"
+              disabled={settingsDisabled || busy}
+              onClick={() => void saveGateway()}
+            >
+              {busy ? t("SettingsStatusSaving") : t("Save")}
+            </button>
+          </div>
         </section>
       )}
       <MenuBarMetricSection

@@ -4,10 +4,15 @@ import type {
 } from "../../../../types/bridge";
 import type { LocaleKey } from "../../../../i18n/keys";
 import { useFormattedResetTime } from "../../../../hooks/useFormattedResetTime";
+import {
+  displayUsageBarPercent,
+  displayUsagePercent,
+} from "../../../../lib/usageDisplay";
 
 interface Props {
   provider: ProviderDetail;
   resetTimeRelative: boolean;
+  showAsUsed: boolean;
   t: (key: LocaleKey) => string;
 }
 
@@ -22,7 +27,7 @@ interface BarSpec {
  * Mirrors the bars in
  * `rust/src/native_ui/preferences.rs::render_provider_detail_panel`.
  */
-export function UsageSection({ provider, resetTimeRelative, t }: Props) {
+export function UsageSection({ provider, resetTimeRelative, showAsUsed, t }: Props) {
   const bars: BarSpec[] = [];
   if (provider.session) {
     bars.push({
@@ -73,6 +78,7 @@ export function UsageSection({ provider, resetTimeRelative, t }: Props) {
           label={b.label}
           rate={b.rate}
           resetTimeRelative={resetTimeRelative}
+          showAsUsed={showAsUsed}
           t={t}
         />
       ))}
@@ -84,15 +90,19 @@ function UsageBar({
   label,
   rate,
   resetTimeRelative,
+  showAsUsed,
   t,
 }: {
   label: string;
   rate: RateWindowSnapshot;
   resetTimeRelative: boolean;
+  showAsUsed: boolean;
   t: (key: LocaleKey) => string;
 }) {
   const usedPct = Number.isFinite(rate.usedPercent) ? Math.max(0, rate.usedPercent) : 0;
-  const pct = Math.min(100, usedPct);
+  const displayPct = displayUsagePercent(rate, showAsUsed);
+  const pct = displayUsageBarPercent(rate, showAsUsed);
+  const displayLabel = showAsUsed ? t("PanelUsedSuffix") : t("PanelLeftSuffix");
   const formattedReset = useFormattedResetTime(
     rate.resetsAt,
     rate.resetDescription,
@@ -112,11 +122,9 @@ function UsageBar({
           className="provider-usage-bar__pct"
           data-exhausted={rate.isExhausted || undefined}
         >
-          {rate.isExhausted
-            ? usedPct > 100
-              ? `${usedPct.toFixed(0)}%`
-              : t("DetailWindowExhausted")
-            : `${usedPct.toFixed(0)}%`}
+          {showAsUsed && rate.isExhausted && usedPct <= 100
+            ? t("DetailWindowExhausted")
+            : `${displayPct.toFixed(0)}% ${displayLabel}`}
         </span>
       </div>
       <div className="provider-usage-bar__track">

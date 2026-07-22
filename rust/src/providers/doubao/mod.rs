@@ -424,8 +424,12 @@ fn decode_coding_plan_usage(bytes: &[u8]) -> Result<CodingPlanResult, ProviderEr
 }
 
 fn coding_plan_snapshot(usage: CodingPlanResult) -> UsageSnapshot {
-    let primary = coding_plan_window(&usage, &["session", "5-hour", "five_hour", "5h"], Some(5 * 60))
-        .unwrap_or_else(|| RateWindow::new(0.0));
+    let primary = coding_plan_window(
+        &usage,
+        &["session", "5-hour", "five_hour", "5h"],
+        Some(5 * 60),
+    )
+    .unwrap_or_else(|| RateWindow::new(0.0));
     let mut snapshot = UsageSnapshot::new(primary);
     if let Some(weekly) = coding_plan_window(&usage, &["weekly", "week"], Some(7 * 24 * 60)) {
         snapshot = snapshot.with_secondary(weekly);
@@ -634,10 +638,9 @@ fn decode_arkcli_usage(bytes: &[u8]) -> Result<CodingPlanResult, ProviderError> 
         .as_ref()
         .and_then(|v| v.auth_method.as_deref())
         .map(str::trim)
+        && method.eq_ignore_ascii_case("none")
     {
-        if method.eq_ignore_ascii_case("none") {
-            return Err(ProviderError::AuthRequired);
-        }
+        return Err(ProviderError::AuthRequired);
     }
 
     let supported = [
@@ -688,17 +691,17 @@ fn decode_arkcli_usage(bytes: &[u8]) -> Result<CodingPlanResult, ProviderError> 
             continue;
         }
         let periods = item.periods.unwrap_or_default();
-        if !periods.is_empty() {
-            if let Some(updated_at) = item.updated_at.filter(|v| *v > 0.0) {
-                // arkcli may emit ms or seconds; 1e11 is the unit threshold.
-                let seconds = if updated_at >= 1e11 {
-                    updated_at / 1000.0
-                } else {
-                    updated_at
-                };
-                if update_ts.map(|t| seconds > t).unwrap_or(true) {
-                    update_ts = Some(seconds);
-                }
+        if !periods.is_empty()
+            && let Some(updated_at) = item.updated_at.filter(|v| *v > 0.0)
+        {
+            // arkcli may emit ms or seconds; 1e11 is the unit threshold.
+            let seconds = if updated_at >= 1e11 {
+                updated_at / 1000.0
+            } else {
+                updated_at
+            };
+            if update_ts.map(|t| seconds > t).unwrap_or(true) {
+                update_ts = Some(seconds);
             }
         }
         for period in periods {
@@ -926,7 +929,9 @@ impl Provider for DoubaoProvider {
                 if resolve_arkcli_binary().is_some() {
                     match fetch_arkcli_usage() {
                         Ok(snap) => return Ok(ProviderFetchResult::new(snap, "arkcli")),
-                        Err(ProviderError::AuthRequired) => return Err(ProviderError::AuthRequired),
+                        Err(ProviderError::AuthRequired) => {
+                            return Err(ProviderError::AuthRequired);
+                        }
                         Err(ProviderError::NotInstalled(_)) => {}
                         Err(_) => {
                             // Fall through to request-header probe if configured.

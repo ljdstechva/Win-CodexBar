@@ -61,41 +61,44 @@ function ThresholdOverrideInputs({
   return (
     <Field label={label}>
       <div className="settings-inline-fields">
-        <input
-          type="number"
-          value={high}
-          min={0}
-          max={100}
-          disabled={disabled}
-          placeholder={String(inheritedHigh)}
-          aria-label={`${label} ${highLabel}`}
-          onChange={(event) => setHigh(event.target.value)}
-          onBlur={commit}
-          onKeyDown={blurOnEnter}
-        />
-        <input
-          type="number"
-          value={critical}
-          min={0}
-          max={100}
-          disabled={disabled}
-          placeholder={String(inheritedCritical)}
-          aria-label={`${label} ${criticalLabel}`}
-          onChange={(event) => setCritical(event.target.value)}
-          onBlur={commit}
-          onKeyDown={blurOnEnter}
-        />
+        <label className="settings-inline-field">
+          <span>{highLabel}</span>
+          <input
+            className="number-input"
+            type="number"
+            value={high}
+            min={0}
+            max={100}
+            disabled={disabled}
+            placeholder={String(inheritedHigh)}
+            aria-label={`${label} ${highLabel}`}
+            onChange={(event) => setHigh(event.target.value)}
+            onBlur={commit}
+            onKeyDown={blurOnEnter}
+          />
+        </label>
+        <label className="settings-inline-field">
+          <span>{criticalLabel}</span>
+          <input
+            className="number-input"
+            type="number"
+            value={critical}
+            min={0}
+            max={100}
+            disabled={disabled}
+            placeholder={String(inheritedCritical)}
+            aria-label={`${label} ${criticalLabel}`}
+            onChange={(event) => setCritical(event.target.value)}
+            onBlur={commit}
+            onKeyDown={blurOnEnter}
+          />
+        </label>
       </div>
     </Field>
   );
 }
 
-export default function GeneralTab({
-  mode = "general",
-  settings,
-  set,
-  saving,
-}: TabProps & { mode?: "general" | "notifications" }) {
+export default function GeneralTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
   const [playingSound, setPlayingSound] = useState(false);
   const [languageOptions, setLanguageOptions] = useState<LanguageOption[]>(
@@ -116,7 +119,7 @@ export default function GeneralTab({
 
   return (
     <>
-      {mode === "general" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">{t("SectionLanguage")}</h3>
         <div className="settings-section__group">
           <Field label={t("InterfaceLanguage")}>
@@ -131,9 +134,9 @@ export default function GeneralTab({
             />
           </Field>
         </div>
-      </section>}
+      </section>
 
-      {mode === "general" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">{t("StartupSettings")}</h3>
         <div className="settings-section__group">
           <Field label={t("StartAtLogin")} description={t("StartAtLoginHelper")} leading>
@@ -155,9 +158,9 @@ export default function GeneralTab({
             />
           </Field>
         </div>
-      </section>}
+      </section>
 
-      {mode === "notifications" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">
           {t("SectionNotifications")}
         </h3>
@@ -217,6 +220,40 @@ export default function GeneralTab({
             </Field>
           )}
         </div>
+      </section>
+
+      <section className="settings-section">
+        <h3 className="settings-section__title">
+          {t("SectionUsageThresholds")}
+        </h3>
+        <div className="settings-section__group">
+          <Field
+            label={t("HighUsageAlert")}
+            description={t("HighUsageWarningHelper")}
+          >
+            <NumberInput
+              value={settings.highUsageThreshold}
+              min={0}
+              max={100}
+              step={5}
+              disabled={saving}
+              onChange={(v) => set({ highUsageThreshold: v })}
+            />
+          </Field>
+          <Field
+            label={t("CriticalUsageAlert")}
+            description={t("CriticalUsageWarningHelper")}
+          >
+            <NumberInput
+              value={settings.criticalUsageThreshold}
+              min={0}
+              max={100}
+              step={5}
+              disabled={saving}
+              onChange={(v) => set({ criticalUsageThreshold: v })}
+            />
+          </Field>
+        </div>
         <div className="settings-section__group">
           {(["codex", "claude"] as const).flatMap((provider) =>
             (["provider", "session", "weekly"] as const).map((window) => {
@@ -266,44 +303,10 @@ export default function GeneralTab({
             }),
           )}
         </div>
-      </section>}
-
-      {mode === "notifications" && <section className="settings-section">
-        <h3 className="settings-section__title">
-          {t("SectionUsageThresholds")}
-        </h3>
-        <div className="settings-section__group">
-          <Field
-            label={t("HighUsageAlert")}
-            description={t("HighUsageWarningHelper")}
-          >
-            <NumberInput
-              value={settings.highUsageThreshold}
-              min={0}
-              max={100}
-              step={5}
-              disabled={saving}
-              onChange={(v) => set({ highUsageThreshold: v })}
-            />
-          </Field>
-          <Field
-            label={t("CriticalUsageAlert")}
-            description={t("CriticalUsageWarningHelper")}
-          >
-            <NumberInput
-              value={settings.criticalUsageThreshold}
-              min={0}
-              max={100}
-              step={5}
-              disabled={saving}
-              onChange={(v) => set({ criticalUsageThreshold: v })}
-            />
-          </Field>
-        </div>
-      </section>}
+      </section>
 
       {/* ── Automation ───────────────────────────────────────────── */}
-      {mode === "general" && <section className="settings-section">
+      <section className="settings-section">
         <h3 className="settings-section__title">{t("SectionRefresh")}</h3>
         <div className="settings-section__group">
           <Field
@@ -345,7 +348,7 @@ export default function GeneralTab({
             />
           </Field>
         </div>
-      </section>}
+      </section>
     </>
   );
 }

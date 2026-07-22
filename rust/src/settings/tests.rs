@@ -7,11 +7,13 @@ fn test_settings_default() {
     assert!(settings.enabled_providers.contains("codex"));
     assert_eq!(settings.refresh_interval_secs, 300);
     assert!(settings.show_notifications);
+    assert!(!settings.show_as_used);
     assert_eq!(settings.high_usage_threshold, 70.0);
     assert_eq!(settings.critical_usage_threshold, 90.0);
     assert!(!settings.show_reset_when_exhausted);
     assert!(!settings.predictive_pace_warning_enabled);
     assert!(!settings.float_bar_show_cost);
+    assert!(settings.float_bar_show_account);
 }
 
 #[test]
@@ -96,6 +98,7 @@ fn float_bar_defaults_are_safe() {
     assert!(!settings.float_bar_dark_text);
     assert!(!settings.float_bar_show_reset_inline);
     assert!(!settings.float_bar_show_cost);
+    assert!(settings.float_bar_show_account);
 }
 
 #[test]
@@ -134,8 +137,11 @@ fn tray_scale_defaults_to_100_percent() {
 
 #[test]
 fn tray_scale_clamp_pins_to_supported_range() {
-    assert_eq!(clamp_tray_scale_percent(0), 100);
-    assert_eq!(clamp_tray_scale_percent(99), 100);
+    assert_eq!(clamp_tray_scale_percent(0), 75);
+    assert_eq!(clamp_tray_scale_percent(74), 75);
+    assert_eq!(clamp_tray_scale_percent(75), 75);
+    assert_eq!(clamp_tray_scale_percent(80), 80);
+    assert_eq!(clamp_tray_scale_percent(99), 99);
     assert_eq!(clamp_tray_scale_percent(100), 100);
     assert_eq!(clamp_tray_scale_percent(125), 125);
     assert_eq!(clamp_tray_scale_percent(180), 180);
@@ -212,6 +218,7 @@ fn float_bar_settings_round_trip_through_raw() {
         float_bar_dark_text: true,
         float_bar_show_reset_inline: true,
         float_bar_show_cost: true,
+        float_bar_show_account: false,
         ..Settings::default()
     };
 
@@ -227,6 +234,20 @@ fn float_bar_settings_round_trip_through_raw() {
     assert!(back.float_bar_dark_text);
     assert!(back.float_bar_show_reset_inline);
     assert!(back.float_bar_show_cost);
+    assert!(!back.float_bar_show_account);
+}
+
+#[test]
+fn legacy_settings_default_to_showing_float_bar_account_data() {
+    let loaded: Settings = serde_json::from_str(
+        r#"{
+            "enabled_providers": ["claude", "codex"],
+            "refresh_interval_secs": 300
+        }"#,
+    )
+    .expect("parse legacy settings");
+
+    assert!(loaded.float_bar_show_account);
 }
 
 #[test]
@@ -471,6 +492,29 @@ fn test_start_at_login_keeps_current_exe_when_desktop_sibling_missing() {
     let command = Settings::start_at_login_command(&cli_path);
 
     assert_eq!(command, format!("\"{}\"", cli_path.display()));
+}
+
+#[test]
+fn test_start_at_login_accepts_only_shipped_executable_names() {
+    for name in [
+        "codexbar.exe",
+        "codexbar-cli.exe",
+        "codexbar-desktop.exe",
+        "codexbar-desktop-tauri.exe",
+    ] {
+        assert!(Settings::can_manage_start_at_login(
+            &std::path::PathBuf::from(name)
+        ));
+    }
+}
+
+#[test]
+fn test_start_at_login_rejects_test_harness_executable() {
+    let test_harness = std::path::PathBuf::from(
+        r"C:\work\target\debug\deps\codexbar_desktop_tauri-9fc45b38fdab8999.exe",
+    );
+
+    assert!(!Settings::can_manage_start_at_login(&test_harness));
 }
 
 #[test]
@@ -875,6 +919,7 @@ fn test_default_settings_skip_empty_provider_configs() {
 fn test_per_provider_defaults_applied() {
     let settings = Settings::default();
     assert_eq!(settings.cookie_source(ProviderId::Codex), "manual");
+    assert_eq!(settings.cookie_source(ProviderId::ChatGPT), "auto");
     assert_eq!(settings.usage_source(ProviderId::Codex), "auto");
     assert_eq!(settings.api_region(ProviderId::Alibaba), "singapore");
     assert_eq!(settings.api_region(ProviderId::Zai), "global");

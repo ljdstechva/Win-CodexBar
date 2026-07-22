@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useLocale } from "../hooks/useLocale";
+import codexbarIcon from "../assets/codexbar-icon.png";
 
 export interface MenuSurfaceAction {
   icon: string;
@@ -22,6 +23,8 @@ interface MenuSurfaceProps {
   onRefresh: () => void;
   isRefreshing: boolean;
   actions: MenuSurfaceAction[];
+  headerActionsLead?: ReactNode;
+  headerPanel?: ReactNode;
   summary?: ReactNode;
   banner?: ReactNode;
   /** Non-button content rendered in the footer nav BEFORE the mapped
@@ -49,6 +52,8 @@ export default function MenuSurface({
   onRefresh,
   isRefreshing,
   actions,
+  headerActionsLead,
+  headerPanel,
   summary,
   banner,
   footerLead,
@@ -60,6 +65,45 @@ export default function MenuSurface({
   return (
     <div className={`menu-surface menu-surface--${variant}`} style={style}>
       {titleBar}
+      <header className="menu-surface__header">
+        <span className="menu-surface__brand">
+          <img
+            className="menu-surface__brand-icon"
+            src={codexbarIcon}
+            alt=""
+            aria-hidden
+          />
+          <span className="menu-surface__title">CodexBar</span>
+        </span>
+        <span className="menu-surface__actions">
+          {headerActionsLead}
+          <button
+            type="button"
+            className="menu-surface__btn"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            aria-label={t("TooltipRefresh")}
+            title={t("TooltipRefresh")}
+          >
+            <span className={isRefreshing ? "spin" : undefined} aria-hidden>
+              ↻
+            </span>
+          </button>
+          {actions.map((action) => (
+            <button
+              key={`${action.title}-${action.icon}`}
+              type="button"
+              className="menu-surface__btn"
+              onClick={action.onClick}
+              aria-label={action.title}
+              title={action.title}
+            >
+              <span aria-hidden>{action.icon}</span>
+            </button>
+          ))}
+        </span>
+      </header>
+      {headerPanel}
       {banner}
       {summary}
       <div className="menu-surface__body">{children}</div>

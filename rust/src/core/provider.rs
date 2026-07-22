@@ -12,6 +12,7 @@ use super::ProviderFetchResult;
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
     Codex,
+    ChatGPT,
     Claude,
     Cursor,
     Factory,
@@ -82,6 +83,7 @@ impl ProviderId {
     pub fn all() -> &'static [ProviderId] {
         &[
             ProviderId::Codex,
+            ProviderId::ChatGPT,
             ProviderId::Claude,
             ProviderId::Cursor,
             ProviderId::Factory,
@@ -152,6 +154,7 @@ impl ProviderId {
     pub fn cli_name(&self) -> &'static str {
         match self {
             ProviderId::Codex => "codex",
+            ProviderId::ChatGPT => "chatgpt",
             ProviderId::Claude => "claude",
             ProviderId::Cursor => "cursor",
             ProviderId::Factory => "factory",
@@ -222,6 +225,7 @@ impl ProviderId {
     pub fn display_name(&self) -> &'static str {
         match self {
             ProviderId::Codex => "Codex",
+            ProviderId::ChatGPT => "ChatGPT",
             ProviderId::Claude => "Claude",
             ProviderId::Cursor => "Cursor",
             ProviderId::Factory => "Factory",
@@ -299,6 +303,7 @@ impl ProviderId {
             ProviderId::Cursor => Some("cursor.com"),
             ProviderId::Factory => Some("app.factory.ai"),
             ProviderId::Codex => Some("chatgpt.com"),
+            ProviderId::ChatGPT => Some("chatgpt.com"),
             ProviderId::Gemini => Some("aistudio.google.com"),
             ProviderId::Kiro => Some("kiro.dev"),
             ProviderId::Kimi => Some("kimi.moonshot.cn"),
@@ -369,6 +374,7 @@ impl ProviderId {
     pub fn from_cli_name(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
             "codex" | "openai" => Some(ProviderId::Codex),
+            "chatgpt" | "openai-web" | "openai web" => Some(ProviderId::ChatGPT),
             "claude" | "anthropic" => Some(ProviderId::Claude),
             "cursor" => Some(ProviderId::Cursor),
             "factory" | "droid" => Some(ProviderId::Factory),
@@ -632,6 +638,8 @@ pub fn cli_name_map() -> HashMap<&'static str, ProviderId> {
     }
     // Add aliases
     map.insert("openai", ProviderId::Codex);
+    map.insert("openai-web", ProviderId::ChatGPT);
+    map.insert("openai web", ProviderId::ChatGPT);
     map.insert("anthropic", ProviderId::Claude);
     map.insert("codebuff", ProviderId::Codebuff);
     map.insert("manicode", ProviderId::Codebuff);
@@ -693,9 +701,10 @@ mod tests {
     #[test]
     fn test_provider_id_all() {
         let all = ProviderId::all();
-        assert_eq!(all.len(), 64);
+        assert_eq!(all.len(), 65);
         assert!(all.contains(&ProviderId::Claude));
         assert!(all.contains(&ProviderId::Codex));
+        assert!(all.contains(&ProviderId::ChatGPT));
         assert!(all.contains(&ProviderId::Kimi));
         assert!(all.contains(&ProviderId::KimiK2));
         assert!(all.contains(&ProviderId::Amp));
@@ -746,17 +755,12 @@ mod tests {
         assert!(ProviderId::CrossModel.is_deprecated());
         assert!(!ProviderId::Kimi.is_deprecated());
         assert!(!ProviderId::AiAnd.is_deprecated());
-        assert!(
-            ProviderId::KimiK2
-                .display_name()
-                .contains("(removed)")
+        assert!(ProviderId::KimiK2.display_name().contains("(removed)"));
+        assert!(ProviderId::CrossModel.display_name().contains("(removed)"));
+        assert_eq!(
+            ProviderId::from_cli_name("kimik2"),
+            Some(ProviderId::KimiK2)
         );
-        assert!(
-            ProviderId::CrossModel
-                .display_name()
-                .contains("(removed)")
-        );
-        assert_eq!(ProviderId::from_cli_name("kimik2"), Some(ProviderId::KimiK2));
         assert_eq!(
             ProviderId::from_cli_name("crossmodel"),
             Some(ProviderId::CrossModel)

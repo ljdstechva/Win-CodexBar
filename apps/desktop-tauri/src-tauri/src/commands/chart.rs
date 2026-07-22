@@ -431,7 +431,7 @@ fn top_model(summary: &CostSummary) -> Option<String> {
         })
 }
 
-fn load_openai_dashboard_chart_data(
+pub(super) fn load_openai_dashboard_chart_data(
     provider_id: &str,
     account_email: Option<&str>,
 ) -> (Vec<DailyCostPoint>, Vec<DailyUsageBreakdown>) {

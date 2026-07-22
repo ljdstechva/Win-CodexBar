@@ -112,11 +112,15 @@ describe("ProvidersSidebar", () => {
         container.querySelectorAll(".providers-sidebar__name"),
         (node) => node.textContent,
       );
-      expect(names.slice(0, 3)).toEqual(["Claude", "Codex", "Cursor"]);
+      expect(names.slice(0, 3)).toEqual([
+        TEST_PROVIDER_CATALOG[1][1],
+        TEST_PROVIDER_CATALOG[0][1],
+        TEST_PROVIDER_CATALOG[2][1],
+      ]);
     });
     expect(onReorder).toHaveBeenCalledWith([
-      "claude",
-      "codex",
+      TEST_PROVIDER_CATALOG[1][0],
+      TEST_PROVIDER_CATALOG[0][0],
       ...TEST_PROVIDER_CATALOG.slice(2).map(([id]) => id),
     ]);
   });

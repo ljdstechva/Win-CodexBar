@@ -67,66 +67,70 @@ const settings: SettingsSnapshot = {
   floatBarDarkText: false,
   floatBarShowResetInline: false,
   floatBarShowCost: false,
+  floatBarShowAccount: true,
   showResetWhenExhausted: false,
 };
 
 describe("GeneralTab language picker", () => {
-  it("renders 6 language options when Traditional Chinese is wired", () => {
+  it("renders 6 language options when Traditional Chinese is wired", async () => {
     render(<GeneralTab settings={settings} set={vi.fn()} saving={false} />);
 
-    const select = screen.getByDisplayValue("English");
+    const select = await screen.findByDisplayValue("English");
     expect(select).toBeInTheDocument();
 
     const options = select.querySelectorAll("option");
     expect(options).toHaveLength(6);
   });
 
-  it("includes spanish as a selectable option", () => {
+  it("includes spanish as a selectable option", async () => {
     render(<GeneralTab settings={settings} set={vi.fn()} saving={false} />);
 
     expect(
-      screen.getByText("Español"),
+      await screen.findByText("Español"),
     ).toBeInTheDocument();
   });
 
-  it("includes korean as a selectable option", () => {
+  it("includes korean as a selectable option", async () => {
     render(<GeneralTab settings={settings} set={vi.fn()} saving={false} />);
 
     expect(
-      screen.getByText("한국어"),
+      await screen.findByText("한국어"),
     ).toBeInTheDocument();
   });
 
-  it("includes Traditional Chinese as a selectable option", () => {
+  it("includes Traditional Chinese as a selectable option", async () => {
     render(<GeneralTab settings={settings} set={vi.fn()} saving={false} />);
 
     expect(screen.getByText("繁體中文")).toBeInTheDocument();
   });
 
-  it("updates the predictive pace warning preference", () => {
+  it("updates the predictive pace warning preference", async () => {
     const set = vi.fn();
     render(
       <GeneralTab
-        mode="notifications"
         settings={settings}
         set={set}
         saving={false}
       />,
     );
+    await screen.findByDisplayValue("English");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "PredictivePaceWarnings" }));
 
     expect(set).toHaveBeenCalledWith({ predictivePaceWarningEnabled: true });
   });
 
-  it("saves a window override on blur and clears it to resume inheritance", () => {
+  it("saves a window override on blur and clears it to resume inheritance", async () => {
     const set = vi.fn();
     const { rerender } = render(
-      <GeneralTab mode="notifications" settings={settings} set={set} saving={false} />,
+      <GeneralTab settings={settings} set={set} saving={false} />,
     );
+    await screen.findByDisplayValue("English");
     const input = screen.getByRole("spinbutton", {
       name: "ProviderNameCodex · ProviderSession HighUsageAlert",
     });
+    expect(input).toHaveClass("number-input");
+    expect(input.closest("label")).toHaveTextContent("HighUsageAlert");
 
     fireEvent.change(input, { target: { value: "80" } });
     fireEvent.blur(input);
@@ -136,7 +140,6 @@ describe("GeneralTab language picker", () => {
 
     rerender(
       <GeneralTab
-        mode="notifications"
         settings={{
           ...settings,
           providerUsageThresholds: { "codex:session": { high: 80 } },

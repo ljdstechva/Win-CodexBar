@@ -4,7 +4,6 @@ import type { BootstrapState, ProviderUsageSnapshot } from "../types/bridge";
 import { openFlyoutWindow, openSettingsWindow, quitApp as quitApplication, reorderProviders } from "../lib/tauri";
 import { useProviders } from "../hooks/useProviders";
 import { useSettings } from "../hooks/useSettings";
-import { useUpdateState } from "../hooks/useUpdateState";
 import { useLocale } from "../hooks/useLocale";
 import MenuCard from "../components/MenuCard";
 import PopOutTitleBar from "../components/PopOutTitleBar";
@@ -12,7 +11,6 @@ import MenuSurface, {
   MenuEmpty,
   type MenuFooterRow,
 } from "../components/MenuSurface";
-import UpdateBanner from "../components/UpdateBanner";
 import ProviderGrid, { prioritizeProviders } from "../components/ProviderGrid";
 import { orderProviderSnapshots } from "../lib/providerOrder";
 
@@ -36,8 +34,6 @@ export default function PopOutPanel({
     hasCachedData,
   } = useProviders();
   const { settings } = useSettings(state.settings);
-  const { updateState, checkNow, download, apply, dismiss, openRelease } =
-    useUpdateState();
   const { t } = useLocale();
 
   const sorted = useMemo(() => {
@@ -189,17 +185,6 @@ export default function PopOutPanel({
     return () => window.removeEventListener("keydown", handler);
   }, [refresh, openSettings, quitApp]);
 
-  const banner = (
-    <UpdateBanner
-      updateState={updateState}
-      onCheck={checkNow}
-      onDownload={download}
-      onApply={apply}
-      onDismiss={dismiss}
-      onOpenRelease={openRelease}
-    />
-  );
-
   const surface = sorted.length === 0 ? (
     <MenuSurface
       variant="popout"
@@ -207,7 +192,6 @@ export default function PopOutPanel({
       onRefresh={refresh}
       isRefreshing={isRefreshing}
       actions={headerActions}
-      banner={banner}
       footerRows={footerRows}
     >
       <MenuEmpty
@@ -222,7 +206,6 @@ export default function PopOutPanel({
       onRefresh={refresh}
       isRefreshing={isRefreshing}
       actions={headerActions}
-      banner={banner}
       footerRows={footerRows}
     >
       <ProviderGrid

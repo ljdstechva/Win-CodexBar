@@ -94,7 +94,14 @@ pub fn open_or_focus(app: &AppHandle, position: Option<(i32, i32)>) -> Result<()
         .map(|(w, h)| (w as f64, h as f64))
         .unwrap_or((props.width, props.height));
 
-    let url = WebviewUrl::App("index.html?window=flyout".into());
+    let proof_notifications = std::env::var("CODEXBAR_PROOF_X_NOTIFICATIONS_OPEN").ok();
+    let url = WebviewUrl::App(
+        flyout_url(
+            crate::proof_harness::is_proof_mode(app),
+            proof_notifications.as_deref(),
+        )
+        .into(),
+    );
 
     let mut builder = tauri::WebviewWindowBuilder::new(app, FLYOUT_LABEL, url)
         .title("CodexBar")
@@ -197,6 +204,21 @@ fn mark_shown(app: &AppHandle) {
         && let Ok(mut guard) = st.lock()
     {
         guard.mark_tray_panel_shown(Instant::now());
+    }
+}
+
+fn flyout_url(proof_mode: bool, proof_notifications: Option<&str>) -> String {
+    let open_notifications = proof_mode
+        && proof_notifications.is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        });
+    if open_notifications {
+        "index.html?window=flyout&xNotifications=open".to_string()
+    } else {
+        "index.html?window=flyout".to_string()
     }
 }
 
@@ -348,6 +370,17 @@ mod tests {
     #[test]
     fn flyout_label_is_stable() {
         assert_eq!(FLYOUT_LABEL, "flyout");
+    }
+
+    #[test]
+    fn notification_panel_query_is_limited_to_explicit_proof_mode() {
+        assert_eq!(flyout_url(false, Some("1")), "index.html?window=flyout");
+        assert_eq!(flyout_url(true, None), "index.html?window=flyout");
+        assert_eq!(flyout_url(true, Some("0")), "index.html?window=flyout");
+        assert_eq!(
+            flyout_url(true, Some("true")),
+            "index.html?window=flyout&xNotifications=open"
+        );
     }
 
     #[test]

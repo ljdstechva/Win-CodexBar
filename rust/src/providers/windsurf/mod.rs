@@ -303,7 +303,7 @@ fn with_identity(
         snapshot = snapshot.with_login_method(plan);
     }
     if let Some(end) = end_timestamp.and_then(DateTime::<Utc>::from_timestamp_millis) {
-        snapshot = snapshot.with_organization(format!("Expires {}", end.format("%Y-%m-%d")));
+        snapshot = snapshot.with_subscription_ends_at(end);
     }
     snapshot
 }
@@ -332,6 +332,11 @@ mod tests {
             Some(75.0)
         );
         assert_eq!(snapshot.login_method.as_deref(), Some("Pro"));
+        assert_eq!(
+            snapshot.subscription_ends_at,
+            DateTime::<Utc>::from_timestamp_millis(1_800_000_000_000)
+        );
+        assert_eq!(snapshot.account_organization, None);
     }
 
     #[test]
