@@ -101,7 +101,7 @@
   weekly data or fabricating 0%. Color each available quota independently: 50% or more green, below 50% yellow, below
   30% orange, below 10% red. Its optional non-interactive account pill shows only the provider's plan type and a
   countdown from a genuine future subscription end date; when a plan exists without an authoritative future date,
-  show the localized `expiry unavailable` fallback instead of silently showing only the plan. Keep ChatGPT entitlement
+  show only the plan. Keep ChatGPT entitlement
   data in its account-only provider and presentation-anchor exactly one ChatGPT account pill after Codex capacity;
   never show email, cost, or inferred expiry data. When Claude supplies its scoped `Fable only` quota, append its remaining percentage as
   `FA` in the capacity pill and show that quota's own reset icon/time when supplied; never fabricate either value, borrow

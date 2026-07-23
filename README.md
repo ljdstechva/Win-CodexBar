@@ -75,7 +75,7 @@ Requirements:
 3. Configure each provider through its supported login, API key, token account, manual cookie, or browser-cookie import flow.
 4. Open **Settings → Display** to enable and configure the FloatBar.
 
-For Claude, briefly close Claude Desktop during CodexBar's first authenticated refresh if the subscription countdown says `expiry unavailable`; Claude Desktop can lock its cookie database. Reopen Claude after CodexBar has loaded the authoritative billing boundary.
+For Claude, briefly close Claude Desktop during CodexBar's first authenticated refresh if the account pill shows only the plan name; Claude Desktop can lock its cookie database. Reopen Claude after CodexBar has loaded the authoritative billing boundary.
 
 ## Main custom surfaces
 

@@ -180,7 +180,6 @@ describe("FloatBar", () => {
         FloatBarNoProviders: "No providers",
         FloatBarRemainingSuffix: "remaining",
         SubscriptionCountdownLeft: "{} left",
-        SubscriptionExpiryUnavailable: "expiry unavailable",
       }),
     );
     eventMocks.listen.mockResolvedValue(() => {});
@@ -321,7 +320,7 @@ describe("FloatBar", () => {
     });
   });
 
-  it("renders a localized truthful fallback when Claude has no authoritative expiry", async () => {
+  it("renders only the plan when Claude has no authoritative expiry", async () => {
     const claude = snapshot("claude", "Claude", 20);
     claude.planName = "Claude Max 5x";
     claude.subscriptionEndsAt = null;
@@ -332,7 +331,7 @@ describe("FloatBar", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".floatbar__account")).toHaveTextContent(
-        "Claude Max 5x · expiry unavailable",
+        "Claude Max 5x",
       );
       expect(container.querySelector(".floatbar__metrics-pill")).toBeNull();
     });
@@ -383,7 +382,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(container.querySelector(".floatbar__capacity")).toBeNull();
       expect(container.querySelector(".floatbar__account")).toHaveTextContent(
-        "ChatGPT Plus · expiry unavailable",
+        "ChatGPT Plus",
       );
       expect(container.querySelector(".floatbar__account")).not.toHaveTextContent(
         "5h",

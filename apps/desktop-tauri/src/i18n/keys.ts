@@ -538,7 +538,6 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarNoProviders",
   "FloatBarRemainingSuffix",
   "SubscriptionCountdownLeft",
-  "SubscriptionExpiryUnavailable",
   "FloatBarShowAccount",
   "FloatBarShowAccountDescription",
   "FloatBarShowCost",

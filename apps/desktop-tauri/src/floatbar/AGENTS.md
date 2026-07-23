@@ -19,8 +19,8 @@
 - Click-through preserves input transparency, removes the drag grip, and uses native cursor bounds detection to fade the entire bar to 10% opacity while hovered.
 - Do not render X notifications, badges, lists, or interactive controls on the FloatBar; those belong to the tray GUI.
 - The optional account pill is non-interactive and shows only a normalized plan type plus a countdown from a genuine
-  future subscription end date. When a plan exists without a future date, show the localized `expiry unavailable`
-  fallback; hide it only when both values are absent. Never show email, cost, or inferred expiry data.
+  future subscription end date. When a plan exists without an authoritative future date, show only the plan; hide it
+  only when both values are absent. Never show email, cost, or inferred expiry data.
 - ChatGPT entitlement stays in the `chatgpt` account-only provider and is presentation-anchored exactly once after the
   related Codex capacity pill. It must never fabricate a capacity window or duplicate the Codex plan pill.
 - Capacity is always remaining quota: `50%+` green, `<50%` yellow, `<30%` orange, `<10%` red; exhausted/error states are red.

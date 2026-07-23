@@ -784,7 +784,6 @@ locale_keys! {
     FloatBarNoProviders,
     FloatBarRemainingSuffix,
     SubscriptionCountdownLeft,
-    SubscriptionExpiryUnavailable,
     FloatBarShowAccount,
     FloatBarShowAccountDescription,
     FloatBarShowCost,

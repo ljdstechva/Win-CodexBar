@@ -21,20 +21,17 @@ export function AccountPill({
   scale,
   now,
   countdownLeft,
-  expiryUnavailable,
 }: {
   provider: ProviderUsageSnapshot;
   summary: AccountSummary;
   scale: number;
   now: Date;
   countdownLeft: string;
-  expiryUnavailable: string;
 }) {
   const countdown = subscriptionCountdown(summary.endsAt, now);
-  const expiryLabel = countdown
-    ? countdownLeft.replace("{}", countdown)
-    : expiryUnavailable;
-  const value = `${summary.planLabel} · ${expiryLabel}`;
+  const value = countdown
+    ? `${summary.planLabel} · ${countdownLeft.replace("{}", countdown)}`
+    : summary.planLabel;
   const expiryMs = summary.endsAt ? Date.parse(summary.endsAt) : Number.NaN;
   const absoluteExpiry = Number.isNaN(expiryMs)
     ? null

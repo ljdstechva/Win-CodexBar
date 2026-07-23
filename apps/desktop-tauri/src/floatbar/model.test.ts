@@ -277,7 +277,7 @@ describe("FloatBar model", () => {
   it("hides an expiry-only account after its genuine end date", () => {
     const value = provider("kimi", 20);
     value.subscriptionEndsAt = "2026-07-23T00:00:00Z";
-    const summary = accountSummary(value);
+    const summary = accountSummary(value, new Date("2026-07-22T23:59:59Z"));
 
     expect(summary).not.toBeNull();
     expect(

@@ -185,7 +185,6 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
                     scale={scale}
                     now={countdownNow}
                     countdownLeft={t("SubscriptionCountdownLeft")}
-                    expiryUnavailable={t("SubscriptionExpiryUnavailable")}
                   />
                 )}
               </Fragment>

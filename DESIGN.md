@@ -161,7 +161,7 @@ Depth comes from tonal layering, a hairline border, and a restrained ambient sha
 
 - **Shape:** compact capsule (`999px`) with `1px 5px` internal padding and a `16px` minimum height.
 - **Color assignment:** dark navy surface with light text; quota values use the explicit remaining-capacity state colors. Pace colors remain part of the dashboard/detail system, not the detached FloatBar.
-- **States:** unavailable quota values render an em dash; weekly-only provider data stays labeled `7d`; reset text is optional and remains localized. A plan without an authoritative future subscription date renders the localized `expiry unavailable` account state.
+- **States:** unavailable quota values render an em dash; weekly-only provider data stays labeled `7d`; reset text is optional and remains localized. A plan without an authoritative future subscription date renders as a plan-only account pill.
 - **Content boundary:** the detached FloatBar contains capacity and optional account-expiry pills only. It never renders Pace pills or signed Pace percentages.
 - **Behavior:** the native overlay stays always-on-top and no-activate. When click-through is enabled, native cursor bounds detection lowers the whole bar to 10% opacity while preserving input transparency.
 
