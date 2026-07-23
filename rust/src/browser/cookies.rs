@@ -15,7 +15,7 @@ use base64::Engine;
 use rusqlite::Connection;
 use thiserror::Error;
 
-use super::detection::{BrowserProfile, DetectedBrowser};
+use super::detection::{BrowserProfile, BrowserType, DetectedBrowser};
 
 /// Errors that can occur during cookie extraction
 #[derive(Debug, Error)]
@@ -70,6 +70,15 @@ impl Cookie {
     pub fn to_header_value(&self) -> String {
         format!("{}={}", self.name, self.value)
     }
+}
+
+/// Cookie header paired with the browser family that produced it. The header
+/// deliberately does not implement `Debug`, preventing accidental secret
+/// disclosure while the browser identity is plumbed into HTTP requests.
+#[derive(Clone)]
+pub struct BrowserCookieHeader {
+    pub header: String,
+    pub browser_type: BrowserType,
 }
 
 /// Cookie extractor for browsers
@@ -268,8 +277,8 @@ impl CookieExtractor {
             decrypt_failures
         );
 
-        // Clean up temp file
-        let _ = std::fs::remove_file(&temp_db);
+        // Clean up the copied SQLite snapshot and any WAL sidecars.
+        Self::cleanup_temp_sqlite(&temp_db);
 
         // If every candidate cookie failed to decrypt and no cookies were recovered,
         // check whether Chrome App-Bound Encryption (Chrome 127+) is the culprit.
@@ -527,8 +536,8 @@ impl CookieExtractor {
             }
         }
 
-        // Clean up
-        let _ = std::fs::remove_file(&temp_db);
+        // Clean up the copied SQLite snapshot and any WAL sidecars.
+        Self::cleanup_temp_sqlite(&temp_db);
 
         Ok(cookies)
     }
@@ -558,8 +567,8 @@ impl CookieExtractor {
         Ok(std::fs::read_to_string(path)?)
     }
 
-    /// Copy a file to a temp location
-    /// Uses Windows-specific file sharing to handle locked files
+    /// Copy a SQLite database and live WAL sidecars to a temp location.
+    /// Uses Windows-specific file sharing to handle locked browser databases.
     fn copy_to_temp(path: &Path) -> Result<std::path::PathBuf, CookieError> {
         let temp_dir = std::env::temp_dir();
         let file_name = path
@@ -569,36 +578,56 @@ impl CookieExtractor {
             .to_string();
         let temp_path = temp_dir.join(format!("codexbar_{}_{}", uuid::Uuid::new_v4(), file_name));
 
-        // On Windows, use FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
-        // to read files that are locked by other processes
-        #[cfg(windows)]
-        {
-            use std::fs::File;
-            use std::io::{Read, Write};
-            use std::os::windows::fs::OpenOptionsExt;
-
-            const FILE_SHARE_READ: u32 = 0x00000001;
-            const FILE_SHARE_WRITE: u32 = 0x00000002;
-            const FILE_SHARE_DELETE: u32 = 0x00000004;
-
-            let mut src = std::fs::OpenOptions::new()
-                .read(true)
-                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-                .open(path)?;
-
-            let mut contents = Vec::new();
-            src.read_to_end(&mut contents)?;
-
-            let mut dst = File::create(&temp_path)?;
-            dst.write_all(&contents)?;
-        }
-
-        #[cfg(not(windows))]
-        {
-            std::fs::copy(path, &temp_path)?;
+        Self::copy_file_shared(path, &temp_path)?;
+        for suffix in ["-wal", "-shm"] {
+            let source_sidecar = sqlite_sidecar_path(path, suffix);
+            if source_sidecar.is_file() {
+                let temp_sidecar = sqlite_sidecar_path(&temp_path, suffix);
+                if let Err(error) = Self::copy_file_shared(&source_sidecar, &temp_sidecar) {
+                    Self::cleanup_temp_sqlite(&temp_path);
+                    return Err(error);
+                }
+            }
         }
 
         Ok(temp_path)
+    }
+
+    #[cfg(windows)]
+    fn copy_file_shared(source: &Path, destination: &Path) -> Result<(), CookieError> {
+        use std::fs::File;
+        use std::io::{Read, Write};
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ: u32 = 0x00000001;
+        const FILE_SHARE_WRITE: u32 = 0x00000002;
+        const FILE_SHARE_DELETE: u32 = 0x00000004;
+
+        let mut source_file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(source)?;
+        let mut contents = Vec::new();
+        source_file.read_to_end(&mut contents)?;
+        let mut destination_file = File::create(destination)?;
+        destination_file.write_all(&contents)?;
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn copy_file_shared(source: &Path, destination: &Path) -> Result<(), CookieError> {
+        std::fs::copy(source, destination)?;
+        Ok(())
+    }
+
+    fn cleanup_temp_sqlite(path: &Path) {
+        for candidate in [
+            path.to_path_buf(),
+            sqlite_sidecar_path(path, "-wal"),
+            sqlite_sidecar_path(path, "-shm"),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
     }
 
     /// Build a cookie header string for HTTP requests
@@ -621,8 +650,9 @@ fn domain_matches(host_key: &str, domain: &str) -> bool {
     host == domain || host == format!(".{domain}") || host.ends_with(&format!(".{domain}"))
 }
 
-/// Helper to get cookies for a specific domain from any available browser
-pub fn get_cookies_for_domain(domain: &str) -> Result<Vec<Cookie>, CookieError> {
+fn get_cookies_for_domain_with_source(
+    domain: &str,
+) -> Result<(Vec<Cookie>, BrowserType), CookieError> {
     use super::detection::BrowserDetector;
 
     let browsers = BrowserDetector::detect_all();
@@ -645,7 +675,7 @@ pub fn get_cookies_for_domain(domain: &str) -> Result<Vec<Cookie>, CookieError> 
                     domain,
                     browser.browser_type.display_name()
                 );
-                return Ok(cookies);
+                return Ok((cookies, browser.browser_type));
             }
             Ok(_) => continue,
             Err(CookieError::AppBoundEncryption) => {
@@ -678,20 +708,85 @@ pub fn get_cookies_for_domain(domain: &str) -> Result<Vec<Cookie>, CookieError> 
     Err(CookieError::NotFound(domain.to_string()))
 }
 
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    value.into()
+}
+
+/// Helper to get cookies for a specific domain from any available browser.
+pub fn get_cookies_for_domain(domain: &str) -> Result<Vec<Cookie>, CookieError> {
+    get_cookies_for_domain_with_source(domain).map(|(cookies, _)| cookies)
+}
+
 /// Get a cookie header string for a domain
 pub fn get_cookie_header(domain: &str) -> Result<String, CookieError> {
-    let cookies = get_cookies_for_domain(domain)?;
-    Ok(CookieExtractor::build_cookie_header(&cookies))
+    get_cookie_header_with_source(domain).map(|source| source.header)
+}
+
+/// Get a cookie header together with the browser family that supplied it.
+pub fn get_cookie_header_with_source(domain: &str) -> Result<BrowserCookieHeader, CookieError> {
+    let (cookies, browser_type) = get_cookies_for_domain_with_source(domain)?;
+    Ok(BrowserCookieHeader {
+        header: CookieExtractor::build_cookie_header(&cookies),
+        browser_type,
+    })
+}
+
+/// Return profile-isolated cookie headers so callers with session-bound
+/// authentication never combine cookies from different browser profiles.
+pub fn get_cookie_headers_for_domain_with_source(
+    domain: &str,
+) -> Result<Vec<BrowserCookieHeader>, CookieError> {
+    use super::detection::BrowserDetector;
+
+    let browsers = BrowserDetector::detect_all();
+    if browsers.is_empty() {
+        return Err(CookieError::BrowserNotInstalled);
+    }
+
+    let mut sources = Vec::new();
+    let mut app_bound_encryption_seen = false;
+    let mut last_error = None;
+
+    for browser in browsers {
+        for profile in &browser.profiles {
+            match CookieExtractor::extract_profile_cookies(&browser, profile, domain) {
+                Ok(cookies) if !cookies.is_empty() => sources.push(BrowserCookieHeader {
+                    header: CookieExtractor::build_cookie_header(&cookies),
+                    browser_type: browser.browser_type,
+                }),
+                Ok(_) => {}
+                Err(CookieError::AppBoundEncryption) => app_bound_encryption_seen = true,
+                Err(error) => last_error = Some(error),
+            }
+        }
+    }
+
+    if !sources.is_empty() {
+        Ok(sources)
+    } else if app_bound_encryption_seen {
+        Err(CookieError::AppBoundEncryption)
+    } else {
+        Err(last_error.unwrap_or_else(|| CookieError::NotFound(domain.to_string())))
+    }
 }
 
 /// Get a cookie header string from the first domain that has readable cookies.
 pub fn get_cookie_header_for_domains(domains: &[&str]) -> Result<String, CookieError> {
+    get_cookie_header_for_domains_with_source(domains).map(|source| source.header)
+}
+
+/// Get a cookie header and browser family from the first domain with readable cookies.
+pub fn get_cookie_header_for_domains_with_source(
+    domains: &[&str],
+) -> Result<BrowserCookieHeader, CookieError> {
     let mut app_bound_encryption_seen = false;
     let mut last_error = None;
 
     for domain in domains {
-        match get_cookie_header(domain) {
-            Ok(header) if !header.trim().is_empty() => return Ok(header),
+        match get_cookie_header_with_source(domain) {
+            Ok(source) if !source.header.trim().is_empty() => return Ok(source),
             Ok(_) => {}
             Err(CookieError::AppBoundEncryption) => app_bound_encryption_seen = true,
             Err(error) => last_error = Some(error),
@@ -734,21 +829,50 @@ mod tests {
     #[test]
     fn test_cookie_extraction() {
         // This test will only work on a machine with Chrome installed
-        match get_cookies_for_domain("claude.ai") {
-            Ok(cookies) => {
-                println!("Found {} cookies for claude.ai", cookies.len());
-                for cookie in &cookies {
-                    println!(
-                        "  {}={}",
-                        cookie.name,
-                        &cookie.value[..20.min(cookie.value.len())]
-                    );
-                }
+        match get_cookies_for_domain_with_source("claude.ai") {
+            Ok((cookies, browser_type)) => {
+                println!(
+                    "Found {} cookies for claude.ai from {}",
+                    cookies.len(),
+                    browser_type.display_name()
+                );
+                let names = cookies
+                    .iter()
+                    .map(|cookie| cookie.name.as_str())
+                    .collect::<Vec<_>>();
+                println!("Cookie names: {}", names.join(", "));
             }
             Err(e) => {
                 println!("Could not get cookies: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn sqlite_snapshot_includes_uncheckpointed_wal_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("Cookies");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+                 PRAGMA wal_autocheckpoint=0;
+                 CREATE TABLE fixtures (value TEXT NOT NULL);
+                 PRAGMA wal_checkpoint(TRUNCATE);
+                 INSERT INTO fixtures (value) VALUES ('current');",
+            )
+            .unwrap();
+        assert!(sqlite_sidecar_path(&database, "-wal").is_file());
+
+        let snapshot = CookieExtractor::copy_to_temp(&database).unwrap();
+        let copied = Connection::open(&snapshot).unwrap();
+        let value: String = copied
+            .query_row("SELECT value FROM fixtures", [], |row| row.get(0))
+            .unwrap();
+        drop(copied);
+        CookieExtractor::cleanup_temp_sqlite(&snapshot);
+
+        assert_eq!(value, "current");
     }
 
     /// Verify that the ABE error variant formats a readable, actionable message.

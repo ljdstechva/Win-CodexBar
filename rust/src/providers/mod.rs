@@ -142,6 +142,13 @@ pub(crate) fn browser_cookie_header(
         .map_err(map_browser_cookie_error)
 }
 
+pub(crate) fn browser_cookie_headers_for_domain_with_source(
+    domain: &str,
+) -> Result<Vec<crate::browser::cookies::BrowserCookieHeader>, crate::core::ProviderError> {
+    crate::browser::cookies::get_cookie_headers_for_domain_with_source(domain)
+        .map_err(map_browser_cookie_error)
+}
+
 pub(crate) fn browser_cookies_for_domain(
     domain: &str,
 ) -> Result<Vec<crate::browser::cookies::Cookie>, crate::core::ProviderError> {

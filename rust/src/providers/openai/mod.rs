@@ -24,6 +24,7 @@ use crate::core::{
     SourceMode, UsageSnapshot,
 };
 use crate::providers::codex::{CodexApi, CodexChatGptSession};
+use crate::subscription_cache::SubscriptionCache;
 use scraper::{
     ChatGPTBootstrapSession, chatgpt_account_plan, chatgpt_bootstrap_session,
     parse_chatgpt_plan_from_accounts_json, parse_json_script,
@@ -244,6 +245,49 @@ impl ChatGPTProvider {
 
         first_plan_only.ok_or_else(|| last_fetch_error.unwrap_or(ProviderError::AuthRequired))
     }
+
+    fn stabilize_subscription(usage: UsageSnapshot, now: DateTime<Utc>) -> UsageSnapshot {
+        let Some(cache) = SubscriptionCache::from_settings() else {
+            return usage;
+        };
+        Self::stabilize_subscription_with_cache(usage, now, &cache)
+    }
+
+    fn stabilize_subscription_with_cache(
+        mut usage: UsageSnapshot,
+        now: DateTime<Utc>,
+        cache: &SubscriptionCache,
+    ) -> UsageSnapshot {
+        let Some(plan_label) = usage.login_method.as_deref() else {
+            return usage;
+        };
+
+        match usage.subscription_ends_at {
+            Some(ends_at) if ends_at > now => {
+                if let Err(error) =
+                    cache.store_authoritative(ProviderId::ChatGPT, plan_label, ends_at, now)
+                {
+                    tracing::debug!(error = %error, "Failed to persist ChatGPT subscription cache");
+                }
+            }
+            Some(ends_at) => {
+                usage.subscription_ends_at = None;
+                if let Err(error) =
+                    cache.store_authoritative(ProviderId::ChatGPT, plan_label, ends_at, now)
+                {
+                    tracing::debug!(error = %error, "Failed to invalidate ChatGPT subscription cache");
+                }
+            }
+            None => match cache.cached_end(ProviderId::ChatGPT, plan_label, now) {
+                Ok(Some(ends_at)) => usage.subscription_ends_at = Some(ends_at),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::debug!(error = %error, "Failed to read ChatGPT subscription cache")
+                }
+            },
+        }
+        usage
+    }
 }
 
 impl Default for ChatGPTProvider {
@@ -264,18 +308,19 @@ impl Provider for ChatGPTProvider {
 
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
         tracing::debug!("Fetching ChatGPT account plan");
-        match ctx.source_mode {
+        let result = match ctx.source_mode {
             SourceMode::Auto => {
                 if let Some(usage) = self.fetch_with_codex_oauth().await? {
-                    return Ok(ProviderFetchResult::new(usage, "oauth"));
+                    ProviderFetchResult::new(usage, "oauth")
+                } else {
+                    let usage = match ctx.manual_cookie_header.as_deref() {
+                        Some(cookie_header) if !cookie_header.trim().is_empty() => {
+                            self.fetch_with_cookies(cookie_header).await?
+                        }
+                        _ => self.fetch_from_browser_profiles().await?,
+                    };
+                    ProviderFetchResult::new(usage, "web")
                 }
-                let usage = match ctx.manual_cookie_header.as_deref() {
-                    Some(cookie_header) if !cookie_header.trim().is_empty() => {
-                        self.fetch_with_cookies(cookie_header).await?
-                    }
-                    _ => self.fetch_from_browser_profiles().await?,
-                };
-                Ok(ProviderFetchResult::new(usage, "web"))
             }
             SourceMode::Web => {
                 let cookie_header = ctx
@@ -284,12 +329,16 @@ impl Provider for ChatGPTProvider {
                     .filter(|header| !header.trim().is_empty())
                     .ok_or(ProviderError::AuthRequired)?;
                 let usage = self.fetch_with_cookies(cookie_header).await?;
-                Ok(ProviderFetchResult::new(usage, "web"))
+                ProviderFetchResult::new(usage, "web")
             }
             SourceMode::OAuth | SourceMode::Cli => {
-                Err(ProviderError::UnsupportedSource(ctx.source_mode))
+                return Err(ProviderError::UnsupportedSource(ctx.source_mode));
             }
-        }
+        };
+        Ok(ProviderFetchResult::new(
+            Self::stabilize_subscription(result.usage, Utc::now()),
+            result.source_label,
+        ))
     }
 
     fn available_sources(&self) -> Vec<SourceMode> {
@@ -353,6 +402,28 @@ mod tests {
         assert!(usage.account_only);
         assert_eq!(usage.login_method.as_deref(), Some("Plus"));
         assert_eq!(usage.subscription_ends_at, None);
+    }
+
+    #[test]
+    fn authoritative_entitlement_warms_and_restores_chatgpt_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = SubscriptionCache::at_path(dir.path().join("subscription-cache.json"));
+        let now = timestamp("2026-07-22T00:00:00Z");
+        let ends_at = timestamp("2026-08-22T00:00:00Z");
+        let live = UsageSnapshot::account_only()
+            .with_login_method("ChatGPT Pro")
+            .with_subscription_ends_at(ends_at);
+
+        let live = ChatGPTProvider::stabilize_subscription_with_cache(live, now, &cache);
+        assert_eq!(live.subscription_ends_at, Some(ends_at));
+
+        let plan_only = UsageSnapshot::account_only().with_login_method("Pro");
+        let restored = ChatGPTProvider::stabilize_subscription_with_cache(
+            plan_only,
+            now + chrono::Duration::hours(1),
+            &cache,
+        );
+        assert_eq!(restored.subscription_ends_at, Some(ends_at));
     }
 
     #[tokio::test]

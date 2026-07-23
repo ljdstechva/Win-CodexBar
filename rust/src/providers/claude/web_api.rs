@@ -1,18 +1,69 @@
 //! Claude Web API fetcher - uses browser cookies to fetch usage from claude.ai
 
+use std::{
+    sync::{Mutex, OnceLock},
+    time::{Duration as StdDuration, Instant},
+};
+
 use chrono::{DateTime, Utc};
 use reqwest::{Client, header};
 use serde::Deserialize;
 
-use crate::browser::cookies::get_cookie_header;
+use crate::browser::{cookies::BrowserCookieHeader, detection::BrowserType};
 #[cfg(target_os = "windows")]
 use crate::browser::{
     cookies::CookieExtractor,
-    detection::{BrowserProfile, BrowserType, DetectedBrowser},
+    detection::{BrowserProfile, DetectedBrowser},
 };
 use crate::core::{
     CostSnapshot, NamedRateWindow, ProviderError, ProviderFetchResult, RateWindow, UsageSnapshot,
 };
+
+const SUBSCRIPTION_403_BACKOFF: StdDuration = StdDuration::from_secs(45 * 60);
+static SUBSCRIPTION_BACKOFF_UNTIL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+fn subscription_probe_backoff_active() -> bool {
+    let mut until = SUBSCRIPTION_BACKOFF_UNTIL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if until.is_some_and(|deadline| deadline > Instant::now()) {
+        true
+    } else {
+        *until = None;
+        false
+    }
+}
+
+fn mark_subscription_403_backoff() {
+    let mut until = SUBSCRIPTION_BACKOFF_UNTIL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    *until = Some(Instant::now() + SUBSCRIPTION_403_BACKOFF);
+}
+
+fn clear_subscription_403_backoff() {
+    let mut until = SUBSCRIPTION_BACKOFF_UNTIL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    *until = None;
+}
+
+fn settle_subscription_403_backoff(saw_forbidden: bool) {
+    if saw_forbidden {
+        mark_subscription_403_backoff();
+    } else {
+        clear_subscription_403_backoff();
+    }
+}
+
+pub(crate) fn is_subscription_forbidden(error: &ProviderError) -> bool {
+    error
+        .to_string()
+        .contains("Claude subscription details: 403 Forbidden")
+}
 
 /// Read the response body as text, then deserialize as JSON. On failure, include
 /// non-sensitive shape metadata so auth redirects, error envelopes, and schema
@@ -278,13 +329,37 @@ impl DesktopBootstrapResponse {
     }
 }
 
-/// Provider-owned, non-personal subscription enrichment from Claude's
-/// authenticated billing response. No cookie, organization, or identity data
-/// leaves this module.
+/// Provider-owned subscription enrichment from Claude's authenticated billing
+/// response. The email is ephemeral, merge-only identity data passed to the
+/// parent provider for its account-safety guard; it is never logged, persisted,
+/// or presented. Cookies and organization identifiers do not leave this module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ClaudeSubscriptionSummary {
     pub(crate) ends_at: DateTime<Utc>,
     pub(crate) plan_name: Option<String>,
+    pub(crate) account_email: Option<String>,
+}
+
+/// Identifies the client that produced an authenticated cookie jar. Cloudflare
+/// can bind `cf_clearance` to the originating User-Agent, so Claude Desktop
+/// must use the Chromium version embedded in its installed Electron runtime
+/// instead of the current standalone-browser value.
+#[derive(Clone, Copy)]
+enum ClaudeCookieClient {
+    Browser(BrowserType),
+    Desktop,
+}
+
+impl ClaudeCookieClient {
+    const DESKTOP_USER_AGENT: &'static str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+         (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+
+    fn user_agent(self) -> &'static str {
+        match self {
+            Self::Browser(browser_type) => browser_type.windows_user_agent(),
+            Self::Desktop => Self::DESKTOP_USER_AGENT,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -343,6 +418,39 @@ fn push_unique_nonempty(values: &mut Vec<String>, candidate: Option<&str>) {
     }
 }
 
+fn subscription_probe_error_priority(error: &ProviderError) -> u8 {
+    let message = error.to_string();
+    if message.contains("Claude subscription details: 403") {
+        3
+    } else if message.contains("Claude subscription details") {
+        2
+    } else if matches!(error, ProviderError::Parse(_)) {
+        0
+    } else {
+        1
+    }
+}
+
+fn retain_preferred_subscription_error(
+    current: &mut Option<ProviderError>,
+    candidate: ProviderError,
+) {
+    if current.as_ref().is_none_or(|error| {
+        subscription_probe_error_priority(&candidate) > subscription_probe_error_priority(error)
+    }) {
+        *current = Some(candidate);
+    }
+}
+
+fn track_subscription_error(
+    current: &mut Option<ProviderError>,
+    saw_forbidden: &mut bool,
+    candidate: ProviderError,
+) {
+    *saw_forbidden |= is_subscription_forbidden(&candidate);
+    retain_preferred_subscription_error(current, candidate);
+}
+
 impl ClaudeWebApiFetcher {
     const BASE_URL: &'static str = "https://claude.ai/api";
 
@@ -361,7 +469,9 @@ impl ClaudeWebApiFetcher {
         if let Some(session_key) = Self::resolve_session_key_from_env() {
             tracing::debug!("Using Claude session key from environment variable");
             let cookie_header = format!("sessionKey={session_key}");
-            return self.fetch_with_cookie_header(&cookie_header).await;
+            return self
+                .fetch_with_cookie_header_for_browser(&cookie_header, None)
+                .await;
         }
 
         // Try multiple domains - Claude uses different domains for different services
@@ -372,22 +482,33 @@ impl ClaudeWebApiFetcher {
             "anthropic.com",
         ];
 
+        let mut last_error = None;
         for domain in domains {
-            match get_cookie_header(domain) {
-                Ok(cookie_header) if !cookie_header.is_empty() => {
-                    tracing::debug!("Found cookies for {}", domain);
-                    return self.fetch_with_cookie_header(&cookie_header).await;
+            match super::super::browser_cookie_headers_for_domain_with_source(domain) {
+                Ok(sources) => {
+                    for source in sources {
+                        tracing::debug!(
+                            domain,
+                            browser = %source.browser_type.display_name(),
+                            "Trying profile-isolated Claude cookies"
+                        );
+                        match self
+                            .fetch_with_cookie_header_for_browser(
+                                &source.header,
+                                Some(ClaudeCookieClient::Browser(source.browser_type)),
+                            )
+                            .await
+                        {
+                            Ok(result) => return Ok(result),
+                            Err(error) => last_error = Some(error),
+                        }
+                    }
                 }
-                Ok(_) => {
-                    tracing::debug!("No cookies found for {}", domain);
-                }
-                Err(e) => {
-                    tracing::debug!("Failed to get cookies for {}: {}", domain, e);
-                }
+                Err(error) => last_error = Some(error),
             }
         }
 
-        Err(ProviderError::NoCookies)
+        Err(last_error.unwrap_or(ProviderError::NoCookies))
     }
 
     /// Fetch only Claude's authoritative renewal/end boundary for enriching a
@@ -395,53 +516,121 @@ impl ClaudeWebApiFetcher {
     pub(crate) async fn fetch_subscription_with_cookies(
         &self,
     ) -> Result<Option<ClaudeSubscriptionSummary>, ProviderError> {
+        if subscription_probe_backoff_active() {
+            return Err(ProviderError::Other(
+                "Claude subscription probe is temporarily deferred after a 403 response"
+                    .to_string(),
+            ));
+        }
         if let Some(session_key) = Self::resolve_session_key_from_env() {
             let cookie_header = format!("sessionKey={session_key}");
-            return self
-                .fetch_subscription_with_cookie_header(&cookie_header)
+            let result = self
+                .fetch_subscription_with_cookie_header(&cookie_header, None)
                 .await;
+            return match result {
+                Ok((summary, saw_forbidden)) => {
+                    settle_subscription_403_backoff(saw_forbidden);
+                    Ok(summary)
+                }
+                Err(error) => {
+                    if is_subscription_forbidden(&error) {
+                        mark_subscription_403_backoff();
+                    }
+                    Err(error)
+                }
+            };
         }
 
         let mut last_error = None;
+        let mut saw_forbidden = false;
+        let mut successful_response_without_future_date = false;
 
-        match Self::claude_desktop_cookie_header() {
-            Ok(Some(cookie_header)) => {
-                match self
-                    .fetch_subscription_with_cookie_header(&cookie_header)
-                    .await
-                {
-                    Ok(Some(summary)) => return Ok(Some(summary)),
-                    Ok(None) => {}
-                    Err(error) => last_error = Some(error),
+        match Self::claude_desktop_cookie_headers() {
+            Ok(sources) => {
+                for source in sources {
+                    match self
+                        .fetch_subscription_with_cookie_header(
+                            &source.header,
+                            Some(ClaudeCookieClient::Desktop),
+                        )
+                        .await
+                    {
+                        Ok((Some(summary), source_saw_forbidden)) => {
+                            saw_forbidden |= source_saw_forbidden;
+                            settle_subscription_403_backoff(saw_forbidden);
+                            return Ok(Some(summary));
+                        }
+                        Ok((None, source_saw_forbidden)) => {
+                            saw_forbidden |= source_saw_forbidden;
+                            successful_response_without_future_date = true;
+                        }
+                        Err(error) => {
+                            track_subscription_error(&mut last_error, &mut saw_forbidden, error)
+                        }
+                    }
                 }
             }
-            Ok(None) => {}
-            Err(error) => last_error = Some(error),
+            Err(error) => track_subscription_error(&mut last_error, &mut saw_forbidden, error),
         }
 
-        match super::super::browser_cookie_header(&[
+        for domain in [
             "claude.ai",
             "claude.com",
             "console.anthropic.com",
             "anthropic.com",
-        ]) {
-            Ok(cookie_header) => match self
-                .fetch_subscription_with_cookie_header(&cookie_header)
-                .await
-            {
-                Ok(summary) => Ok(summary),
-                Err(error) => Err(error),
-            },
-            Err(error) => Err(last_error.unwrap_or(error)),
+        ] {
+            match super::super::browser_cookie_headers_for_domain_with_source(domain) {
+                Ok(sources) => {
+                    for source in sources {
+                        match self
+                            .fetch_subscription_with_cookie_header(
+                                &source.header,
+                                Some(ClaudeCookieClient::Browser(source.browser_type)),
+                            )
+                            .await
+                        {
+                            Ok((Some(summary), source_saw_forbidden)) => {
+                                saw_forbidden |= source_saw_forbidden;
+                                settle_subscription_403_backoff(saw_forbidden);
+                                return Ok(Some(summary));
+                            }
+                            Ok((None, source_saw_forbidden)) => {
+                                saw_forbidden |= source_saw_forbidden;
+                                successful_response_without_future_date = true;
+                            }
+                            Err(error) => {
+                                track_subscription_error(&mut last_error, &mut saw_forbidden, error)
+                            }
+                        }
+                    }
+                }
+                Err(error) => track_subscription_error(&mut last_error, &mut saw_forbidden, error),
+            }
+        }
+
+        if saw_forbidden {
+            mark_subscription_403_backoff();
+        }
+        if successful_response_without_future_date {
+            if !saw_forbidden {
+                clear_subscription_403_backoff();
+            }
+            Ok(None)
+        } else {
+            let error = last_error.unwrap_or(ProviderError::NoCookies);
+            Err(error)
         }
     }
 
     async fn fetch_subscription_with_cookie_header(
         &self,
         cookie_header: &str,
-    ) -> Result<Option<ClaudeSubscriptionSummary>, ProviderError> {
-        let account_headers = Self::build_headers(cookie_header);
-        let subscription_headers = Self::build_subscription_headers(cookie_header);
+        cookie_client: Option<ClaudeCookieClient>,
+    ) -> Result<(Option<ClaudeSubscriptionSummary>, bool), ProviderError> {
+        Self::ensure_subscription_user_agent_parity(cookie_header, cookie_client)?;
+        let account_headers = Self::build_headers_for_browser(cookie_header, cookie_client);
+        let subscription_headers =
+            Self::build_subscription_headers_for_browser(cookie_header, cookie_client);
         let account = self.get_account_info(&account_headers).await.ok();
         let mut org_ids = Vec::new();
 
@@ -467,6 +656,7 @@ impl ClaudeWebApiFetcher {
         }
 
         let mut last_error = None;
+        let mut saw_forbidden = false;
         let mut successful_response_without_future_date = false;
 
         for org_id in org_ids {
@@ -477,20 +667,29 @@ impl ClaudeWebApiFetcher {
                 Ok(details) => {
                     if let Some(ends_at) = details.future_end(Utc::now()) {
                         let plan_name = self
-                            .get_desktop_bootstrap_plan_name(&org_id, cookie_header)
+                            .get_desktop_bootstrap_plan_name(&org_id, cookie_header, cookie_client)
                             .await
                             .ok()
                             .flatten();
-                        return Ok(Some(ClaudeSubscriptionSummary { ends_at, plan_name }));
+                        return Ok((
+                            Some(ClaudeSubscriptionSummary {
+                                ends_at,
+                                plan_name,
+                                account_email: account
+                                    .as_ref()
+                                    .and_then(|account| account.email_address.clone()),
+                            }),
+                            saw_forbidden,
+                        ));
                     }
                     successful_response_without_future_date = true;
                 }
-                Err(error) => last_error = Some(error),
+                Err(error) => track_subscription_error(&mut last_error, &mut saw_forbidden, error),
             }
         }
 
         if successful_response_without_future_date {
-            Ok(None)
+            Ok((None, saw_forbidden))
         } else {
             Err(last_error.unwrap_or_else(|| {
                 ProviderError::Other(
@@ -524,9 +723,18 @@ impl ClaudeWebApiFetcher {
         &self,
         cookie_header: &str,
     ) -> Result<ProviderFetchResult, ProviderError> {
+        self.fetch_with_cookie_header_for_browser(cookie_header, None)
+            .await
+    }
+
+    async fn fetch_with_cookie_header_for_browser(
+        &self,
+        cookie_header: &str,
+        cookie_client: Option<ClaudeCookieClient>,
+    ) -> Result<ProviderFetchResult, ProviderError> {
         tracing::debug!("Fetching Claude usage via web API");
 
-        let headers = Self::build_headers(cookie_header);
+        let headers = Self::build_headers_for_browser(cookie_header, cookie_client);
 
         // Step 1: Get organization ID
         let org_id = self.get_organization_id(cookie_header, &headers).await?;
@@ -549,7 +757,7 @@ impl ClaudeWebApiFetcher {
         // and billing. AccountResponse.rate_limit_tier is account-global and
         // can describe another membership in multi-organization accounts.
         let scoped_plan_name = self
-            .get_desktop_bootstrap_plan_name(&org_id, cookie_header)
+            .get_desktop_bootstrap_plan_name(&org_id, cookie_header, cookie_client)
             .await
             .ok()
             .flatten();
@@ -557,12 +765,42 @@ impl ClaudeWebApiFetcher {
         // Step 5: Fetch the provider's subscription renewal/end boundary.
         // This endpoint is optional because Team/Enterprise organizations can
         // reject it and usage must remain available in that case.
-        let subscription_headers = Self::build_subscription_headers(cookie_header);
-        let subscription_end = self
-            .get_subscription_details(&org_id, &subscription_headers)
-            .await
-            .ok()
-            .and_then(|details| details.future_end(Utc::now()));
+        let subscription_end = if subscription_probe_backoff_active() {
+            None
+        } else {
+            match Self::ensure_subscription_user_agent_parity(cookie_header, cookie_client) {
+                Ok(()) => {
+                    let subscription_headers =
+                        Self::build_subscription_headers_for_browser(cookie_header, cookie_client);
+                    match self
+                        .get_subscription_details(&org_id, &subscription_headers)
+                        .await
+                    {
+                        Ok(details) => {
+                            clear_subscription_403_backoff();
+                            details.future_end(Utc::now())
+                        }
+                        Err(error) => {
+                            if is_subscription_forbidden(&error) {
+                                mark_subscription_403_backoff();
+                            }
+                            tracing::debug!(
+                                error = %crate::logging::safe_error_message(error),
+                                "Claude subscription probe unavailable"
+                            );
+                            None
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        error = %crate::logging::safe_error_message(error),
+                        "Claude subscription probe skipped"
+                    );
+                    None
+                }
+            }
+        };
 
         // Build the result. When five_hour is null (enterprise/credit accounts with no live
         // session), emit a fixed 5h 0% placeholder and mark it informational so notifications
@@ -658,6 +896,13 @@ impl ClaudeWebApiFetcher {
     }
 
     fn build_headers(cookie_header: &str) -> reqwest::header::HeaderMap {
+        Self::build_headers_for_browser(cookie_header, None)
+    }
+
+    fn build_headers_for_browser(
+        cookie_header: &str,
+        cookie_client: Option<ClaudeCookieClient>,
+    ) -> reqwest::header::HeaderMap {
         use reqwest::header::HeaderValue;
 
         let mut headers = reqwest::header::HeaderMap::new();
@@ -676,8 +921,9 @@ impl ClaudeWebApiFetcher {
         headers.insert(
             header::USER_AGENT,
             HeaderValue::from_static(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-                 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+                cookie_client
+                    .map(ClaudeCookieClient::user_agent)
+                    .unwrap_or_else(|| BrowserType::Chrome.windows_user_agent()),
             ),
         );
         headers.insert(
@@ -689,39 +935,59 @@ impl ClaudeWebApiFetcher {
     }
 
     fn build_subscription_headers(cookie_header: &str) -> reqwest::header::HeaderMap {
+        Self::build_subscription_headers_for_browser(cookie_header, None)
+    }
+
+    fn build_subscription_headers_for_browser(
+        cookie_header: &str,
+        cookie_client: Option<ClaudeCookieClient>,
+    ) -> reqwest::header::HeaderMap {
         use reqwest::header::{HeaderName, HeaderValue};
 
-        let mut headers = Self::build_headers(cookie_header);
+        let mut headers = Self::build_headers_for_browser(cookie_header, cookie_client);
+        headers.remove(header::ORIGIN);
+        headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
+        headers.insert(
+            header::ACCEPT_LANGUAGE,
+            HeaderValue::from_static("en-US,en;q=0.9"),
+        );
         headers.insert(
             header::REFERER,
             HeaderValue::from_static("https://claude.ai/settings/billing"),
         );
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        for name in [
-            "anthropic-client-sha",
-            "anthropic-client-version",
-            "anthropic-client-build",
-            "anthropic-anonymous-id",
-            "anthropic-device-id",
+        for (name, value) in [
+            ("sec-fetch-dest", "empty"),
+            ("sec-fetch-mode", "cors"),
+            ("sec-fetch-site", "same-origin"),
         ] {
             headers.insert(
                 HeaderName::from_static(name),
-                HeaderValue::from_static("unknown"),
+                HeaderValue::from_static(value),
             );
         }
         headers
     }
 
+    fn ensure_subscription_user_agent_parity(
+        cookie_header: &str,
+        cookie_client: Option<ClaudeCookieClient>,
+    ) -> Result<(), ProviderError> {
+        if cookie_value(cookie_header, "cf_clearance").is_some() && cookie_client.is_none() {
+            return Err(ProviderError::Other(
+                "Claude subscription probe skipped because the cf_clearance browser family is unknown"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     #[cfg(target_os = "windows")]
-    fn claude_desktop_cookie_header() -> Result<Option<String>, ProviderError> {
+    fn claude_desktop_cookie_headers() -> Result<Vec<BrowserCookieHeader>, ProviderError> {
         let Some(user_data_dir) = dirs::data_dir().map(|path| path.join("Claude")) else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         if !user_data_dir.join("Local State").is_file() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
         let mut profile_paths = Vec::new();
@@ -738,6 +1004,7 @@ impl ClaudeWebApiFetcher {
         }
 
         let mut last_error = None;
+        let mut sources = Vec::new();
         for (index, profile_path) in profile_paths.into_iter().enumerate() {
             let browser = DetectedBrowser {
                 browser_type: BrowserType::Chromium,
@@ -759,23 +1026,28 @@ impl ClaudeWebApiFetcher {
                 };
                 let cookie_header = CookieExtractor::build_cookie_header(&cookies);
                 if has_claude_session_cookie(&cookie_header) {
-                    return Ok(Some(cookie_header));
+                    sources.push(BrowserCookieHeader {
+                        header: cookie_header,
+                        browser_type: BrowserType::Chromium,
+                    });
                 }
             }
         }
 
-        if let Some(error) = last_error {
+        if !sources.is_empty() {
+            Ok(sources)
+        } else if let Some(error) = last_error {
             Err(ProviderError::Other(format!(
                 "Failed to read Claude desktop session: {error}"
             )))
         } else {
-            Ok(None)
+            Ok(Vec::new())
         }
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn claude_desktop_cookie_header() -> Result<Option<String>, ProviderError> {
-        Ok(None)
+    fn claude_desktop_cookie_headers() -> Result<Vec<BrowserCookieHeader>, ProviderError> {
+        Ok(Vec::new())
     }
 
     fn resolve_session_key_from_env() -> Option<String> {
@@ -930,10 +1202,13 @@ impl ClaudeWebApiFetcher {
         &self,
         org_id: &str,
         cookie_header: &str,
+        cookie_client: Option<ClaudeCookieClient>,
     ) -> Result<Option<String>, ProviderError> {
         use reqwest::header::{HeaderName, HeaderValue};
 
-        let mut headers = Self::build_subscription_headers(cookie_header);
+        Self::ensure_subscription_user_agent_parity(cookie_header, cookie_client)?;
+        let mut headers =
+            Self::build_subscription_headers_for_browser(cookie_header, cookie_client);
         headers.insert(
             HeaderName::from_static("anthropic-client-platform"),
             HeaderValue::from_static("desktop_app"),
@@ -973,7 +1248,10 @@ impl ClaudeWebApiFetcher {
                 .get(&url)
                 .headers(headers.clone())
                 .send()
-                .await?;
+                .await
+                .map_err(|_| {
+                    ProviderError::Other("Claude subscription request failed".to_string())
+                })?;
 
             if response.status().is_success() {
                 return parse_json_with_body(response, "Claude subscription details").await;
@@ -1081,7 +1359,7 @@ fn cookie_value(cookie_header: &str, name: &str) -> Option<String> {
 }
 
 fn has_claude_session_cookie(cookie_header: &str) -> bool {
-    ["sessionKey", "sessionKeyLC", "sessionKeyV3LC"]
+    ["sessionKey", "sessionKeyLC", "sessionKeyV3LC", "__ssid"]
         .iter()
         .any(|name| cookie_value(cookie_header, name).is_some())
 }
@@ -1089,10 +1367,12 @@ fn has_claude_session_cookie(cookie_header: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountResponse, ClaudeWebApiFetcher, DesktopBootstrapResponse,
-        SubscriptionDetailsResponse, UsageWindow, cookie_value, has_claude_session_cookie,
-        push_unique_nonempty,
+        AccountResponse, ClaudeCookieClient, ClaudeWebApiFetcher, DesktopBootstrapResponse,
+        SubscriptionDetailsResponse, UsageWindow, clear_subscription_403_backoff, cookie_value,
+        has_claude_session_cookie, push_unique_nonempty, settle_subscription_403_backoff,
+        subscription_probe_backoff_active, track_subscription_error,
     };
+    use crate::core::ProviderError;
     use chrono::{DateTime, Utc};
     use reqwest::header;
     use std::sync::{Mutex, OnceLock};
@@ -1324,12 +1604,7 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("https://claude.ai/settings/billing")
         );
-        assert_eq!(
-            headers
-                .get(header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok()),
-            Some("application/json")
-        );
+        assert!(!headers.contains_key(header::CONTENT_TYPE));
         for name in [
             "anthropic-client-sha",
             "anthropic-client-version",
@@ -1337,11 +1612,94 @@ mod tests {
             "anthropic-anonymous-id",
             "anthropic-device-id",
         ] {
-            assert_eq!(
-                headers.get(name).and_then(|value| value.to_str().ok()),
-                Some("unknown")
-            );
+            assert!(!headers.contains_key(name));
         }
+    }
+
+    #[test]
+    fn subscription_headers_preserve_cookie_browser_user_agent() {
+        let headers = ClaudeWebApiFetcher::build_subscription_headers_for_browser(
+            "sessionKey=fixture",
+            Some(ClaudeCookieClient::Browser(
+                crate::browser::detection::BrowserType::Edge,
+            )),
+        );
+
+        assert!(
+            headers
+                .get(header::USER_AGENT)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.contains("Edg/150"))
+        );
+    }
+
+    #[test]
+    fn forbidden_subscription_error_survives_later_non_forbidden_candidates() {
+        let mut preferred = None;
+        let mut saw_forbidden = false;
+
+        track_subscription_error(
+            &mut preferred,
+            &mut saw_forbidden,
+            ProviderError::Other(
+                "Failed to get Claude subscription details: 403 Forbidden".to_string(),
+            ),
+        );
+        track_subscription_error(
+            &mut preferred,
+            &mut saw_forbidden,
+            ProviderError::Other(
+                "Failed to get Claude subscription details: 404 Not Found".to_string(),
+            ),
+        );
+
+        assert!(saw_forbidden);
+        assert!(
+            preferred
+                .expect("the forbidden error should remain preferred")
+                .to_string()
+                .contains("403 Forbidden")
+        );
+    }
+
+    #[test]
+    fn successful_candidate_keeps_backoff_after_earlier_forbidden() {
+        let _guard = env_lock().lock().unwrap();
+        clear_subscription_403_backoff();
+        let mut preferred = None;
+        let mut saw_forbidden = false;
+
+        track_subscription_error(
+            &mut preferred,
+            &mut saw_forbidden,
+            ProviderError::Other(
+                "Failed to get Claude subscription details: 403 Forbidden".to_string(),
+            ),
+        );
+        // This is the action taken when a later profile returns a valid summary.
+        settle_subscription_403_backoff(saw_forbidden);
+
+        assert!(subscription_probe_backoff_active());
+        clear_subscription_403_backoff();
+    }
+
+    #[test]
+    fn clearance_cookie_requires_known_browser_family() {
+        let error = ClaudeWebApiFetcher::ensure_subscription_user_agent_parity(
+            "sessionKey=fixture; cf_clearance=fixture",
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("browser family is unknown"));
+        assert!(
+            ClaudeWebApiFetcher::ensure_subscription_user_agent_parity(
+                "sessionKey=fixture; cf_clearance=fixture",
+                Some(ClaudeCookieClient::Browser(
+                    crate::browser::detection::BrowserType::Firefox,
+                )),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1359,6 +1717,7 @@ mod tests {
         assert!(has_claude_session_cookie("sessionKey=legacy"));
         assert!(has_claude_session_cookie("sessionKeyLC=current"));
         assert!(has_claude_session_cookie("sessionKeyV3LC=current-v3"));
+        assert!(has_claude_session_cookie("__ssid=current-web-session"));
         assert!(!has_claude_session_cookie("lastActiveOrg=org-123"));
     }
 
@@ -1470,30 +1829,52 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an authenticated Claude desktop session"]
     async fn live_web_snapshot_uses_active_organization_plan_and_billing_boundary() {
-        let cookie_header = ClaudeWebApiFetcher::claude_desktop_cookie_header()
-            .expect("Claude desktop cookie extraction should not fail")
-            .expect("Claude desktop must have an authenticated session");
         let fetcher = ClaudeWebApiFetcher::new();
-        let account_headers = ClaudeWebApiFetcher::build_headers(&cookie_header);
-        let subscription_headers = ClaudeWebApiFetcher::build_subscription_headers(&cookie_header);
-        let org_id = fetcher
-            .get_organization_id(&cookie_header, &account_headers)
-            .await
-            .expect("the active Claude organization should resolve");
-        let expected_plan = fetcher
-            .get_desktop_bootstrap_plan_name(&org_id, &cookie_header)
-            .await
-            .expect("the active organization's bootstrap should load")
-            .expect("the active organization should expose a plan");
-        let expected_end = fetcher
-            .get_subscription_details(&org_id, &subscription_headers)
-            .await
-            .expect("the active organization's billing details should load")
-            .future_end(Utc::now())
-            .expect("the active organization should expose a future billing boundary");
+        let mut live_source = None;
+        for source in ClaudeWebApiFetcher::claude_desktop_cookie_headers()
+            .expect("Claude desktop cookie extraction should not fail")
+        {
+            let account_headers = ClaudeWebApiFetcher::build_headers_for_browser(
+                &source.header,
+                Some(ClaudeCookieClient::Desktop),
+            );
+            let subscription_headers = ClaudeWebApiFetcher::build_subscription_headers_for_browser(
+                &source.header,
+                Some(ClaudeCookieClient::Desktop),
+            );
+            let Ok(org_id) = fetcher
+                .get_organization_id(&source.header, &account_headers)
+                .await
+            else {
+                continue;
+            };
+            let Ok(Some(expected_plan)) = fetcher
+                .get_desktop_bootstrap_plan_name(
+                    &org_id,
+                    &source.header,
+                    Some(ClaudeCookieClient::Desktop),
+                )
+                .await
+            else {
+                continue;
+            };
+            let Ok(details) = fetcher
+                .get_subscription_details(&org_id, &subscription_headers)
+                .await
+            else {
+                continue;
+            };
+            let Some(expected_end) = details.future_end(Utc::now()) else {
+                continue;
+            };
+            live_source = Some((source, expected_plan, expected_end));
+            break;
+        }
+        let (source, expected_plan, expected_end) = live_source
+            .expect("Claude desktop must have an authenticated session with billing data");
 
         let result = fetcher
-            .fetch_with_cookie_header(&cookie_header)
+            .fetch_with_cookie_header_for_browser(&source.header, Some(ClaudeCookieClient::Desktop))
             .await
             .expect("the normal Claude Web path should fetch live usage");
 

@@ -19,6 +19,7 @@ use crate::core::{
     FetchContext, Provider, ProviderError, ProviderFetchResult, ProviderId, ProviderMetadata,
     RateWindow, SourceMode, UsageSnapshot,
 };
+use crate::subscription_cache::{SubscriptionCache, plan_labels_match};
 
 use admin_api::ClaudeAdminApiFetcher;
 #[cfg(test)]
@@ -386,32 +387,55 @@ impl ClaudeProvider {
         &self,
         mut result: ProviderFetchResult,
     ) -> ProviderFetchResult {
-        if result.usage.subscription_ends_at.is_some() || result.source_label == "web" {
+        let now = Utc::now();
+        if result
+            .usage
+            .subscription_ends_at
+            .is_some_and(|ends_at| ends_at > now)
+        {
+            cache_claude_subscription(&result.usage, now);
+            return result;
+        }
+        result.usage.subscription_ends_at = None;
+
+        // The normal web usage path has already attempted the optional billing
+        // endpoint. A missing date here is a probe failure/no-data outcome, so
+        // the last-known-good cache is the only honest fallback.
+        if result.source_label == "web" {
+            restore_cached_claude_subscription(&mut result.usage, now);
             return result;
         }
 
         let summary = match self.web_fetcher.fetch_subscription_with_cookies().await {
             Ok(Some(summary)) => summary,
-            Ok(None) => return result,
+            Ok(None) => {
+                restore_cached_claude_subscription(&mut result.usage, now);
+                return result;
+            }
             Err(error) => {
                 tracing::debug!(
                     error = %crate::logging::safe_error_message(error),
                     "Claude subscription enrichment unavailable"
                 );
+                restore_cached_claude_subscription(&mut result.usage, now);
                 return result;
             }
         };
 
-        if claude_plan_labels_match(
+        if claude_subscription_accounts_match(
+            result.usage.account_email.as_deref(),
+            summary.account_email.as_deref(),
             result.usage.login_method.as_deref(),
             summary.plan_name.as_deref(),
         ) {
             result.usage = result.usage.with_subscription_ends_at(summary.ends_at);
+            cache_claude_subscription(&result.usage, now);
         } else {
             // Do not merge a billing boundary from a different browser account
-            // into an OAuth/CLI quota snapshot. The FloatBar will show the
-            // truthful localized unavailable state instead.
-            tracing::debug!("Claude subscription enrichment skipped because plans did not match");
+            // into an OAuth/CLI quota snapshot.
+            tracing::debug!(
+                "Claude subscription enrichment skipped because accounts did not match"
+            );
         }
 
         result
@@ -642,24 +666,56 @@ impl ClaudeProvider {
     }
 }
 
-fn normalized_claude_plan_label(value: &str) -> Option<String> {
-    let compact = value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    let normalized = compact.strip_prefix("claude").unwrap_or(&compact);
-    (!normalized.is_empty() && normalized != "oauth").then(|| normalized.to_string())
+fn cache_claude_subscription(usage: &UsageSnapshot, now: chrono::DateTime<Utc>) {
+    let (Some(plan_label), Some(ends_at), Some(cache)) = (
+        usage.login_method.as_deref(),
+        usage.subscription_ends_at,
+        SubscriptionCache::from_settings(),
+    ) else {
+        return;
+    };
+    if let Err(error) = cache.store_authoritative(ProviderId::Claude, plan_label, ends_at, now) {
+        tracing::debug!(error = %error, "Failed to persist Claude subscription cache");
+    }
 }
 
 fn claude_plan_labels_match(left: Option<&str>, right: Option<&str>) -> bool {
-    let Some(left) = left.and_then(normalized_claude_plan_label) else {
-        return false;
+    left.zip(right)
+        .is_some_and(|(left, right)| plan_labels_match(left, right))
+}
+
+fn claude_subscription_accounts_match(
+    snapshot_email: Option<&str>,
+    billing_email: Option<&str>,
+    snapshot_plan: Option<&str>,
+    billing_plan: Option<&str>,
+) -> bool {
+    let snapshot_email = snapshot_email
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let billing_email = billing_email
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (snapshot_email, billing_email) {
+        (Some(snapshot), Some(billing)) => snapshot.eq_ignore_ascii_case(billing),
+        _ => claude_plan_labels_match(snapshot_plan, billing_plan),
+    }
+}
+
+fn restore_cached_claude_subscription(usage: &mut UsageSnapshot, now: chrono::DateTime<Utc>) {
+    let (Some(plan_label), Some(cache)) = (
+        usage.login_method.as_deref(),
+        SubscriptionCache::from_settings(),
+    ) else {
+        return;
     };
-    let Some(right) = right.and_then(normalized_claude_plan_label) else {
-        return false;
-    };
-    left == right
+    match cache.cached_end(ProviderId::Claude, plan_label, now) {
+        Ok(Some(ends_at)) => usage.subscription_ends_at = Some(ends_at),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::debug!(error = %error, "Failed to read Claude subscription cache")
+        }
+    }
 }
 
 fn record_auto_source(
@@ -1069,10 +1125,18 @@ mod tests {
     }
 
     #[test]
-    fn matches_only_the_same_claude_plan_for_subscription_enrichment() {
+    fn matches_claude_plan_prefixes_in_both_directions() {
         assert!(claude_plan_labels_match(
             Some("Claude Max 5x"),
             Some("claude_max_5x")
+        ));
+        assert!(claude_plan_labels_match(
+            Some("Claude Max"),
+            Some("Claude Max 5x")
+        ));
+        assert!(claude_plan_labels_match(
+            Some("Claude Max 20x"),
+            Some("Max")
         ));
         assert!(!claude_plan_labels_match(
             Some("Claude Max 5x"),
@@ -1083,6 +1147,36 @@ mod tests {
             Some("Claude Max 5x")
         ));
         assert!(!claude_plan_labels_match(Some("Claude Max 5x"), None));
+    }
+
+    #[test]
+    fn matching_emails_authorize_merge_despite_plan_formatting() {
+        assert!(claude_subscription_accounts_match(
+            Some(" USER@example.com "),
+            Some("user@EXAMPLE.com"),
+            Some("Claude Max 5x"),
+            Some("Claude Pro"),
+        ));
+    }
+
+    #[test]
+    fn conflicting_emails_refuse_merge_even_when_plans_match() {
+        assert!(!claude_subscription_accounts_match(
+            Some("oauth@example.com"),
+            Some("browser@example.com"),
+            Some("Claude Max 5x"),
+            Some("Claude Max 5x"),
+        ));
+    }
+
+    #[test]
+    fn missing_email_falls_back_to_plan_prefix_match() {
+        assert!(claude_subscription_accounts_match(
+            Some("oauth@example.com"),
+            None,
+            Some("Claude Max 5x"),
+            Some("Claude Max"),
+        ));
     }
 
     #[tokio::test]

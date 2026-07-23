@@ -72,11 +72,10 @@ pub(crate) fn build_fetch_context(
                 // Try browser cookie extraction as fallback when no manual cookie is set.
                 // On non-Windows this is a harmless no-op that returns an error.
                 let cookie_header = active_token_cookie.or(stored_cookie).or_else(|| {
-                    // ChatGPT owns browser-profile selection because the first
-                    // readable profile is not necessarily authenticated and can
-                    // contain an oversized cookie set. Let the provider try each
-                    // profile until it finds a usable session.
-                    (id != ProviderId::ChatGPT)
+                    // ChatGPT and Claude own browser-profile selection because
+                    // authentication and Cloudflare state must not be combined
+                    // across profiles. Let each provider try isolated profiles.
+                    (!matches!(id, ProviderId::ChatGPT | ProviderId::Claude))
                         .then(|| provider_cookie_domain(id, settings))
                         .flatten()
                         .and_then(|domain| {

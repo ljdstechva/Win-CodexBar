@@ -17,6 +17,7 @@ pub mod providers;
 pub mod secure_file;
 pub mod settings;
 pub mod sound;
+pub(crate) mod subscription_cache;
 
 pub mod status;
 pub mod tray;

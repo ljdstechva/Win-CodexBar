@@ -21,6 +21,26 @@ pub enum BrowserType {
 }
 
 impl BrowserType {
+    /// Current reduced Windows User-Agent for requests that must stay paired
+    /// with cookies extracted from this browser family. Chromium browsers
+    /// freeze the minor/build components in the legacy UA string.
+    pub fn windows_user_agent(&self) -> &'static str {
+        match self {
+            BrowserType::Edge => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+            }
+            BrowserType::Firefox => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) \
+                 Gecko/20100101 Firefox/152.0"
+            }
+            BrowserType::Chrome | BrowserType::Brave | BrowserType::Arc | BrowserType::Chromium => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+            }
+        }
+    }
+
     /// Get all browser types
     pub fn all() -> &'static [BrowserType] {
         &[
@@ -277,5 +297,25 @@ mod tests {
                 browser.profiles.len()
             );
         }
+    }
+
+    #[test]
+    fn browser_user_agents_preserve_family_identity() {
+        assert!(
+            BrowserType::Chrome
+                .windows_user_agent()
+                .contains("Chrome/150")
+        );
+        assert!(BrowserType::Edge.windows_user_agent().contains("Edg/150"));
+        assert!(
+            BrowserType::Brave
+                .windows_user_agent()
+                .contains("Chrome/150")
+        );
+        assert!(
+            BrowserType::Firefox
+                .windows_user_agent()
+                .contains("Firefox/152")
+        );
     }
 }
