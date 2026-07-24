@@ -3,9 +3,11 @@
 //! X profile pages currently ship a React Flight payload containing the
 //! visible profile timeline. We parse only the small, stable subset needed by
 //! the notification surface: author identity, post id, text, and timestamp.
-//! Public access is attempted first; if X serves a login/interstitial page, a
-//! locally logged-in browser session is retried without ever persisting or
-//! logging the cookie header.
+//! A locally logged-in browser session is used first with X's web GraphQL API.
+//! Public HTML and syndication remain as best-effort fallbacks without ever
+//! persisting or logging the cookie header.
+
+mod graphql;
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -97,9 +99,23 @@ struct Assignment<'a> {
 /// Fetch all watched profiles concurrently. A failed profile does not hide
 /// successful profiles; callers receive both the posts and readable errors.
 pub async fn fetch_watchlist(targets: &[XWatchTarget]) -> (Vec<XPost>, Vec<XNotificationError>) {
-    let futures = targets
-        .iter()
-        .map(|target| fetch_profile_timelines(target.handle));
+    let client = match profile_client(targets.first().map_or("", |target| target.handle)) {
+        Ok(client) => client,
+        Err(error) => return (Vec::new(), vec![error]),
+    };
+    let cookie_header = browser_cookie_header().await;
+    let graphql_session = cookie_header
+        .as_deref()
+        .and_then(graphql::GraphQlSession::from_cookie_header);
+    let futures = targets.iter().map(|target| {
+        fetch_profile_timelines_with_context(
+            &client,
+            target.handle,
+            cookie_header.as_deref(),
+            graphql_session.as_ref(),
+            graphql::CURRENT_QUERY_IDS,
+        )
+    });
     let mut posts = Vec::new();
     let mut errors = Vec::new();
     for (mut profile_posts, mut profile_errors) in futures::future::join_all(futures).await {
@@ -123,24 +139,114 @@ pub async fn fetch_profile(handle: &str) -> Result<Vec<XPost>, XNotificationErro
 }
 
 async fn fetch_profile_timelines(handle: &str) -> (Vec<XPost>, Vec<XNotificationError>) {
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|error| request_error(handle, PROFILE_TIMELINES[0], error));
-    let client = match client {
+    let client = match profile_client(handle) {
         Ok(client) => client,
         Err(error) => return (Vec::new(), vec![error]),
     };
+    let cookie_header = browser_cookie_header().await;
+    let graphql_session = cookie_header
+        .as_deref()
+        .and_then(graphql::GraphQlSession::from_cookie_header);
+    fetch_profile_timelines_with_context(
+        &client,
+        handle,
+        cookie_header.as_deref(),
+        graphql_session.as_ref(),
+        graphql::CURRENT_QUERY_IDS,
+    )
+    .await
+}
 
+fn profile_client(handle: &str) -> Result<reqwest::Client, XNotificationError> {
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|error| request_error(handle, PROFILE_TIMELINES[0], error))
+}
+
+async fn browser_cookie_header() -> Option<String> {
+    // Browser cookie extraction can touch locked browser databases, so keep it
+    // off the async runtime thread. The value is used only in memory and is
+    // never persisted or logged.
+    tokio::task::spawn_blocking(best_x_cookie_header)
+        .await
+        .ok()
+        .flatten()
+}
+
+fn best_x_cookie_header() -> Option<String> {
+    use crate::browser::cookies::{
+        get_cookie_header_for_domains, get_cookie_headers_for_domain_with_source,
+    };
+
+    let primary = get_cookie_header_for_domains(&["x.com", "twitter.com"]).ok();
+    if primary
+        .as_deref()
+        .and_then(graphql::GraphQlSession::from_cookie_header)
+        .is_some()
+    {
+        return primary;
+    }
+
+    // The generic helper intentionally returns the first readable browser
+    // profile. X authentication may live in a later profile, so inspect the
+    // existing profile-isolated sources and prefer the first complete web
+    // session without ever combining, persisting, or logging their headers.
+    for domain in ["x.com", "twitter.com"] {
+        if let Ok(sources) = get_cookie_headers_for_domain_with_source(domain)
+            && let Some(source) = sources.into_iter().find(|source| {
+                graphql::GraphQlSession::from_cookie_header(&source.header).is_some()
+            })
+        {
+            return Some(source.header);
+        }
+    }
+
+    primary
+}
+
+async fn fetch_profile_timelines_with_context(
+    client: &reqwest::Client,
+    handle: &str,
+    cookie_header: Option<&str>,
+    graphql_session: Option<&graphql::GraphQlSession>,
+    query_ids: graphql::GraphQlQueryIds,
+) -> (Vec<XPost>, Vec<XNotificationError>) {
+    if let Some(session) = graphql_session {
+        match graphql::fetch_profile(client, session, handle, query_ids).await {
+            Ok(posts) => return (posts, Vec::new()),
+            Err(graphql_error) => {
+                let fallback = fetch_profile_fallbacks(client, handle, cookie_header).await;
+                return preserve_fallback_after_graphql_failure(graphql_error, fallback);
+            }
+        }
+    }
+
+    fetch_profile_fallbacks(client, handle, cookie_header).await
+}
+
+fn preserve_fallback_after_graphql_failure(
+    graphql_error: XNotificationError,
+    (posts, mut errors): (Vec<XPost>, Vec<XNotificationError>),
+) -> (Vec<XPost>, Vec<XNotificationError>) {
+    errors.insert(0, graphql_error);
+    (posts, errors)
+}
+
+async fn fetch_profile_fallbacks(
+    client: &reqwest::Client,
+    handle: &str,
+    cookie_header: Option<&str>,
+) -> (Vec<XPost>, Vec<XNotificationError>) {
     let public_futures = futures::future::join_all(
         PROFILE_TIMELINES
             .iter()
             .copied()
-            .map(|timeline| fetch_profile_html(&client, handle, timeline, None)),
+            .map(|timeline| fetch_profile_html(client, handle, timeline, None)),
     );
     let (public_results, syndication_result) =
-        tokio::join!(public_futures, fetch_syndication_html(&client, handle));
+        tokio::join!(public_futures, fetch_syndication_html(client, handle));
     let mut posts = Vec::new();
     let mut missing = Vec::new();
     for (timeline, result) in PROFILE_TIMELINES.into_iter().zip(public_results) {
@@ -166,24 +272,10 @@ async fn fetch_profile_timelines(handle: &str) -> (Vec<XPost>, Vec<XNotification
         Err(error) => syndication_error = Some(error),
     }
 
-    // Browser cookie extraction can touch locked browser databases, so keep it
-    // off the async runtime thread. The value is used only for missing
-    // timelines and is never persisted or logged.
-    let cookie_header = if missing.is_empty() {
-        None
-    } else {
-        tokio::task::spawn_blocking(|| {
-            crate::browser::cookies::get_cookie_header_for_domains(&["x.com", "twitter.com"]).ok()
-        })
-        .await
-        .ok()
-        .flatten()
-    };
-
     let mut errors = Vec::new();
-    if let Some(cookie_header) = cookie_header {
+    if let Some(cookie_header) = cookie_header.filter(|_| !missing.is_empty()) {
         for (timeline, _public_error) in missing {
-            match fetch_profile_html(&client, handle, timeline, Some(&cookie_header)).await {
+            match fetch_profile_html(client, handle, timeline, Some(cookie_header)).await {
                 Ok(html) => {
                     let mut timeline_posts = parse_profile_html(handle, &html);
                     if timeline_posts.is_empty() {
@@ -828,6 +920,35 @@ mod tests {
         assert!(errors[0].is_rate_limited());
     }
 
+    #[test]
+    fn rotated_graphql_id_preserves_successful_fallback_coverage() {
+        let fallback_posts = vec![XPost {
+            id: "123456".into(),
+            handle: "OpenAI".into(),
+            display_name: "OpenAI".into(),
+            text: "Fallback coverage".into(),
+            created_at: Utc.timestamp_opt(1_700_000_000, 0).single().unwrap(),
+            url: "https://x.com/OpenAI/status/123456".into(),
+            avatar_url: None,
+            kind: XPostKind::Post,
+        }];
+        let rotated = XNotificationError::Request {
+            handle: "OpenAI".into(),
+            timeline: "authenticated GraphQL timeline".into(),
+            message: "HTTP 404".into(),
+        };
+
+        let (posts, errors) =
+            preserve_fallback_after_graphql_failure(rotated, (fallback_posts, Vec::new()));
+
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].url, "https://x.com/OpenAI/status/123456");
+        assert!(matches!(
+            errors.as_slice(),
+            [XNotificationError::Request { message, .. }] if message == "HTTP 404"
+        ));
+    }
+
     #[tokio::test]
     #[ignore = "live X network probe"]
     async fn live_watchlist_profiles_have_posts() {
@@ -858,16 +979,77 @@ mod tests {
             .iter()
             .filter(|post| post.kind == XPostKind::Reply)
             .count();
+        let thsottiaux_recent = recent
+            .iter()
+            .filter(|post| post.handle.eq_ignore_ascii_case("thsottiaux"))
+            .count();
         eprintln!(
-            "live X probe: total={}, recent={}, replies={}, diagnostics={}",
+            "live X probe: total={}, recent={}, replies={}, thsottiaux_recent={}, diagnostics={}",
             posts.len(),
             recent.len(),
             reply_count,
+            thsottiaux_recent,
             errors.len()
+        );
+        assert!(
+            thsottiaux_recent >= 1,
+            "no @thsottiaux-authored item from the last seven days; diagnostics: {:?}",
+            errors
         );
         assert!(
             reply_count > 0,
             "no recent replies were captured; diagnostics: {:?}",
+            errors
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "live X network probe"]
+    async fn live_rotated_graphql_id_falls_back_without_losing_openai() {
+        let handle = "OpenAI";
+        let client = profile_client(handle).expect("X HTTP client");
+        let cookie_header = browser_cookie_header()
+            .await
+            .expect("authenticated X browser cookies");
+        let session = graphql::GraphQlSession::from_cookie_header(&cookie_header)
+            .expect("auth_token and ct0 cookies");
+        graphql::clear_cached_user_id(handle);
+        let bogus_ids = graphql::GraphQlQueryIds {
+            user_by_screen_name: graphql::CURRENT_QUERY_IDS.user_by_screen_name,
+            user_tweets_and_replies: "forced-rotated-query-id",
+        };
+
+        let (posts, errors) = fetch_profile_timelines_with_context(
+            &client,
+            handle,
+            Some(&cookie_header),
+            Some(&session),
+            bogus_ids,
+        )
+        .await;
+        eprintln!(
+            "live X bogus-id fallback: openai_posts={}, diagnostics={}",
+            posts
+                .iter()
+                .filter(|post| post.handle.eq_ignore_ascii_case(handle))
+                .count(),
+            errors.len()
+        );
+
+        assert!(
+            posts
+                .iter()
+                .any(|post| post.handle.eq_ignore_ascii_case(handle)),
+            "fallback lost @OpenAI coverage; diagnostics: {:?}",
+            errors
+        );
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                XNotificationError::Request { message, .. }
+                    if message == "HTTP 400" || message == "HTTP 404"
+            )),
+            "forced rotated-id error was not observed: {:?}",
             errors
         );
     }

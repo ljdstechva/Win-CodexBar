@@ -1,0 +1,122 @@
+{
+  "data": {
+    "user": {
+      "result": {
+        "timeline": {
+          "timeline": {
+            "instructions": [
+              {
+                "type": "TimelineAddEntries",
+                "entries": [
+                  {
+                    "entryId": "conversation-thread-1",
+                    "content": {
+                      "items": [
+                        {
+                          "item": {
+                            "itemContent": {
+                              "tweet_results": {
+                                "result": {
+                                  "__typename": "Tweet",
+                                  "rest_id": "foreign-1",
+                                  "core": {
+                                    "user_results": {
+                                      "result": {
+                                        "rest_id": "999",
+                                        "core": {
+                                          "screen_name": "other",
+                                          "name": "Other Author"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "legacy": {
+                                    "created_at": "Thu Jul 23 12:00:00 +0000 2026",
+                                    "full_text": "A foreign tweet included in the conversation.",
+                                    "in_reply_to_status_id_str": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "item": {
+                            "itemContent": {
+                              "tweet_results": {
+                                "result": {
+                                  "__typename": "Tweet",
+                                  "rest_id": "target-reply",
+                                  "core": {
+                                    "user_results": {
+                                      "result": {
+                                        "rest_id": "100",
+                                        "core": {
+                                          "screen_name": "target",
+                                          "name": "Target Author"
+                                        },
+                                        "avatar": {
+                                          "image_url": "https://example.test/target.jpg"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "legacy": {
+                                    "created_at": "Thu Jul 23 11:00:00 +0000 2026",
+                                    "full_text": "@other Target-authored reply.",
+                                    "in_reply_to_status_id_str": "foreign-1"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "entryId": "tweet-target-note",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "rest_id": "target-note",
+                            "core": {
+                              "user_results": {
+                                "result": {
+                                  "rest_id": "100",
+                                  "legacy": {
+                                    "screen_name": "target",
+                                    "name": "Target Author",
+                                    "profile_image_url_https": "https://example.test/target.jpg"
+                                  }
+                                }
+                              }
+                            },
+                            "legacy": {
+                              "created_at": "Thu Jul 23 13:00:00 +0000 2026",
+                              "full_text": "Short text",
+                              "in_reply_to_status_id_str": null
+                            },
+                            "note_tweet": {
+                              "note_tweet_results": {
+                                "result": {
+                                  "text": "This is the longer note-tweet text from the target author."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
