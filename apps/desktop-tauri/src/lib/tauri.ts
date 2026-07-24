@@ -28,6 +28,7 @@ import type {
   RegionOption,
   SafeDiagnostics,
   CredentialStorageStatus,
+  CodexResetHistorySnapshot,
   WorkAreaRect,
   AgentSession,
   AgentSessionDiscoveryResult,
@@ -151,6 +152,10 @@ export function openExternalUrl(url: string): Promise<void> {
 
 export function getXNotifications(): Promise<XNotificationSnapshot> {
   return invoke<XNotificationSnapshot>("get_x_notifications");
+}
+
+export function getCodexResetHistory(): Promise<CodexResetHistorySnapshot> {
+  return invoke<CodexResetHistorySnapshot>("get_codex_reset_history");
 }
 
 export function refreshXNotifications(): Promise<XNotificationSnapshot> {

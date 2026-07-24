@@ -16,6 +16,8 @@
 //! and suppresses blur-dismiss so the window stays visible for automated
 //! screenshot capture. Set `CODEXBAR_PROOF_NO_ACTIVATE=1` when capture must
 //! remain behind the user's active window without taking keyboard focus.
+//! `CODEXBAR_PROOF_RESET_HISTORY_OPEN=1` opens the Codex reset-history overlay
+//! after its live data is loaded.
 
 use std::sync::{LazyLock, Mutex};
 
@@ -50,6 +52,7 @@ pub struct ProofStatePayload {
     pub menu_path: Option<String>,
     pub menu_items: Vec<String>,
     pub x_notifications_open: bool,
+    pub reset_history_open: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -300,6 +303,15 @@ fn proof_x_notifications_open_value_is_enabled(value: Option<&str>) -> bool {
     })
 }
 
+fn proof_reset_history_open_value_is_enabled(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
 pub fn capture_state(app: &AppHandle) -> Result<ProofStatePayload, String> {
     let (mode, target, tray_anchor) = {
         let st = app
@@ -336,6 +348,12 @@ pub fn capture_state(app: &AppHandle) -> Result<ProofStatePayload, String> {
         x_notifications_open: is_proof_mode(app)
             && proof_x_notifications_open_value_is_enabled(
                 std::env::var("CODEXBAR_PROOF_X_NOTIFICATIONS_OPEN")
+                    .ok()
+                    .as_deref(),
+            ),
+        reset_history_open: is_proof_mode(app)
+            && proof_reset_history_open_value_is_enabled(
+                std::env::var("CODEXBAR_PROOF_RESET_HISTORY_OPEN")
                     .ok()
                     .as_deref(),
             ),
@@ -747,6 +765,15 @@ mod tests {
         assert!(proof_x_notifications_open_value_is_enabled(Some("yes")));
         assert!(!proof_x_notifications_open_value_is_enabled(Some("0")));
         assert!(!proof_x_notifications_open_value_is_enabled(None));
+    }
+
+    #[test]
+    fn reset_history_proof_flag_requires_an_explicit_true_value() {
+        assert!(proof_reset_history_open_value_is_enabled(Some("1")));
+        assert!(proof_reset_history_open_value_is_enabled(Some(" TRUE ")));
+        assert!(proof_reset_history_open_value_is_enabled(Some("yes")));
+        assert!(!proof_reset_history_open_value_is_enabled(Some("0")));
+        assert!(!proof_reset_history_open_value_is_enabled(None));
     }
 
     #[test]

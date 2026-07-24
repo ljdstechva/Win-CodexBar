@@ -195,6 +195,7 @@ export interface ProofStatePayload {
   menuPath: string | null;
   menuItems: string[];
   xNotificationsOpen: boolean;
+  resetHistoryOpen: boolean;
 }
 
 export type ProofCommand =
@@ -524,6 +525,40 @@ export interface XNotificationSnapshot {
   lastCheckedAt: string | null;
   lastSuccessAt: string | null;
   lastError: string | null;
+}
+
+export interface CodexBankedResetHistoryEntry {
+  kind: "banked";
+  id: string;
+  grantedAt: string;
+  expiresAt: string | null;
+  redeemedAt: string | null;
+  redeemStartedAt: string | null;
+  status: string;
+  title: string;
+  description: string;
+  grantor: string | null;
+  resetType: string;
+  recordedAt: string;
+}
+
+export interface CodexAnnouncedResetHistoryEntry {
+  kind: "announced";
+  postId: string;
+  postDate: string;
+  handle: string;
+  url: string;
+  snippet: string;
+  recordedAt: string;
+}
+
+export type CodexResetHistoryEntry =
+  | CodexBankedResetHistoryEntry
+  | CodexAnnouncedResetHistoryEntry;
+
+export interface CodexResetHistorySnapshot {
+  entries: CodexResetHistoryEntry[];
+  stale: boolean;
 }
 
 // ── Credential store types ───────────────────────────────────────────

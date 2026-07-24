@@ -7,6 +7,7 @@ import CopyIconButton from "./menu-card/CopyIconButton";
 import LocalTokenUsage from "./menu-card/LocalTokenUsage";
 import MetricRow from "./menu-card/MetricRow";
 import PaceSection from "./menu-card/PaceSection";
+import ResetHistory from "./menu-card/ResetHistory";
 import WayfinderUsage from "./menu-card/WayfinderUsage";
 import {
   buildMetricEntries,
@@ -48,6 +49,7 @@ const MenuCard = ({
     onLayoutChange,
   });
   const isWayfinder = provider.providerId === "wayfinder";
+  const isCodex = provider.providerId === "codex";
   const email = !isWayfinder && provider.accountEmail
     ? hideEmail
       ? maskEmail(provider.accountEmail)
@@ -90,7 +92,7 @@ const MenuCard = ({
     "menu-card",
     provider.error ? "menu-card--error" : null,
     isRefreshing ? "menu-card--refreshing" : null,
-    hasDetails ? "menu-card--with-details" : "menu-card--header-only",
+    hasDetails || isCodex ? "menu-card--with-details" : "menu-card--header-only",
   ]
     .filter(Boolean)
     .join(" ");
@@ -191,6 +193,8 @@ const MenuCard = ({
           )}
         </div>
       )}
+
+      {isCodex && <ResetHistory />}
     </article>
   );
 };

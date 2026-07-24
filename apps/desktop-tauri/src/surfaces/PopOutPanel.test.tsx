@@ -16,6 +16,7 @@ const tauriMocks = vi.hoisted(() => ({
   openSettingsWindow: vi.fn(),
   quitApp: vi.fn(),
   getProviderChartData: vi.fn(),
+  getProofState: vi.fn(),
   getLocaleStrings: vi.fn(),
   setUiLanguage: vi.fn(),
 }));
@@ -224,6 +225,7 @@ describe("PopOutPanel", () => {
       usageBreakdown: [],
       localUsage: null,
     });
+    tauriMocks.getProofState.mockRejectedValue(new Error("proof disabled"));
     tauriMocks.getLocaleStrings.mockResolvedValue(
       buildBundle({
         PanelAllProviders: "All providers",

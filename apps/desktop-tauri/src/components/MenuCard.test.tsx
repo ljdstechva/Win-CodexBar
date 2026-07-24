@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getProviderChartData: vi.fn(),
+  getCodexResetHistory: vi.fn(),
+  getProofState: vi.fn(),
+  openExternalUrl: vi.fn(),
   getLocaleStrings: vi.fn(),
   setUiLanguage: vi.fn(),
 }));
@@ -129,6 +132,22 @@ describe("MenuCard", () => {
         PanelUsedSuffix: "used",
         ProviderWeeklyLabel: "Weekly",
         SubscriptionCountdownLeft: "{} left",
+        ResetHistoryButton: "Reset history",
+        ResetHistoryHeading: "Reset history",
+        ResetHistoryDescription: "Banked credits and reset announcements",
+        ResetHistoryRefresh: "Refresh",
+        ResetHistoryLoading: "Loading…",
+        ResetHistoryLoadFailed: "Reset history could not be loaded.",
+        ResetHistoryEmpty: "No reset credits recorded yet.",
+        ResetHistoryBanked: "BANKED",
+        ResetHistoryNonBanked: "NON-BANKED",
+        ResetHistoryAvailable: "Available",
+        ResetHistoryExpiresIn: "Expires in {}d {}h",
+        ResetHistoryRedeemed: "Redeemed",
+        ResetHistoryRedeemedOn: "Redeemed {}",
+        ResetHistoryExpired: "Expired",
+        ResetHistoryStale: "Showing saved history.",
+        ResetHistoryOpenAnnouncement: "Open {}",
         ResetsInHoursMinutes: "Resets in {}h {}m",
         ResetsInMinutes: "Resets in {}m",
         WayfinderGatewayStatus: "Gateway",
@@ -156,7 +175,141 @@ describe("MenuCard", () => {
         tokenCostUpdatedAtMs: 1234,
       },
     });
+    tauriMocks.getCodexResetHistory.mockResolvedValue({
+      entries: [],
+      stale: false,
+    });
+    tauriMocks.getProofState.mockRejectedValue(new Error("proof disabled"));
+    tauriMocks.openExternalUrl.mockResolvedValue(undefined);
     eventMocks.listen.mockResolvedValue(() => {});
+  });
+
+  it("renders reset history only at the bottom of the Codex card", async () => {
+    const claudeRender = renderCard(provider(null));
+    expect(
+      screen.queryByRole("button", { name: "Reset history" }),
+    ).not.toBeInTheDocument();
+    claudeRender.unmount();
+
+    const snapshot = provider(null);
+    snapshot.providerId = "codex";
+    snapshot.displayName = "Codex";
+    const { container } = renderCard(snapshot);
+
+    const trigger = await screen.findByRole("button", {
+      name: "Reset history",
+    });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(
+      container.querySelector(".menu-card")?.lastElementChild,
+    ).toHaveClass("codex-reset-history");
+  });
+
+  it("shows banked and non-banked reset history and opens the exact X URL", async () => {
+    tauriMocks.getCodexResetHistory.mockResolvedValue({
+      stale: false,
+      entries: [
+        {
+          kind: "announced",
+          postId: "1888123456789012345",
+          postDate: "2026-07-15T11:00:00Z",
+          handle: "OpenAI",
+          url: "https://x.com/OpenAI/status/1888123456789012345",
+          snippet: "Codex rate limits have been reset for everyone.",
+          recordedAt: "2026-07-15T11:05:00Z",
+        },
+        {
+          kind: "banked",
+          id: "RateLimitResetCredit_1",
+          grantedAt: "2026-07-13T17:49:11Z",
+          expiresAt: "2099-08-12T17:49:11Z",
+          redeemedAt: null,
+          redeemStartedAt: null,
+          status: "available",
+          title: "Full reset",
+          description: "Reset all Codex rate limits.",
+          grantor: "Codex Team",
+          resetType: "codex_rate_limits",
+          recordedAt: "2026-07-14T00:00:00Z",
+        },
+      ],
+    });
+    const snapshot = provider(null);
+    snapshot.providerId = "codex";
+    snapshot.displayName = "Codex";
+    const { container } = renderCard(snapshot);
+
+    const trigger = await screen.findByRole("button", {
+      name: "Reset history",
+    });
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await screen.findByRole("region", { name: "Reset history" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("BANKED")).toBeInTheDocument();
+    expect(screen.getByText("NON-BANKED")).toBeInTheDocument();
+    expect(screen.getByText("Full reset")).toBeInTheDocument();
+    expect(screen.getByText("Codex Team")).toBeInTheDocument();
+    expect(screen.getByText(/Available · Expires in \d+d \d+h/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Codex rate limits have been reset for everyone."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      container.querySelector(".codex-reset-history__item--link")!,
+    );
+    expect(tauriMocks.openExternalUrl).toHaveBeenCalledWith(
+      "https://x.com/OpenAI/status/1888123456789012345",
+    );
+  });
+
+  it("closes reset history on Escape and outside pointer input", async () => {
+    const snapshot = provider(null);
+    snapshot.providerId = "codex";
+    const { container } = renderCard(snapshot);
+    const trigger = await screen.findByRole("button", {
+      name: "Reset history",
+    });
+
+    fireEvent.click(trigger);
+    await screen.findByRole("region", { name: "Reset history" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("region", { name: "Reset history" }),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    await screen.findByRole("region", { name: "Reset history" });
+    fireEvent.pointerDown(document.body);
+    expect(
+      container.querySelector(".codex-reset-history__panel"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens reset history automatically only for an explicit proof request", async () => {
+    tauriMocks.getProofState.mockResolvedValue({
+      mode: "trayPanel",
+      target: { kind: "summary" },
+      windowRect: null,
+      trayAnchor: null,
+      workArea: null,
+      menuPath: null,
+      menuItems: [],
+      xNotificationsOpen: false,
+      resetHistoryOpen: true,
+    });
+    const snapshot = provider(null);
+    snapshot.providerId = "codex";
+
+    renderCard(snapshot);
+
+    expect(
+      await screen.findByRole("region", { name: "Reset history" }),
+    ).toBeInTheDocument();
+    expect(tauriMocks.getCodexResetHistory).toHaveBeenCalled();
   });
 
   it("does not mix stale local usage into an error card", async () => {

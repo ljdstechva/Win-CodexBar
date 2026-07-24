@@ -222,6 +222,7 @@ describe("TrayPanel provider grid", () => {
       menuPath: null,
       menuItems: [],
       xNotificationsOpen: false,
+      resetHistoryOpen: false,
     });
     tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
     tauriMocks.updateSettings.mockResolvedValue(settings());
@@ -385,6 +386,7 @@ describe("TrayPanel provider grid", () => {
       menuPath: null,
       menuItems: [],
       xNotificationsOpen: true,
+      resetHistoryOpen: false,
     });
 
     renderTrayPanel([provider("codex", "Codex", 35)]);
