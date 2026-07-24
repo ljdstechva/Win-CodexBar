@@ -14,8 +14,8 @@ use crate::core::{
     SourceMode,
 };
 
-pub use api::CodexApi;
 pub(crate) use api::CodexChatGptSession;
+pub use api::{CodexApi, CodexResetCredit};
 
 /// Codex provider for fetching AI usage limits
 pub struct CodexProvider {

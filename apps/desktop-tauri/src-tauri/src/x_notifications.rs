@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use codexbar::codex_reset_history::{CodexResetAnnouncement, CodexResetHistoryStore};
 use codexbar::x_notifications::{XPost, XWatchTarget};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -18,6 +19,8 @@ const FAILURE_RETRY_INITIAL: Duration = Duration::from_secs(30);
 const RATE_LIMIT_RETRY_MINIMUM: Duration = Duration::from_secs(15 * 60);
 const POLL_JITTER_PERCENT: u128 = 10;
 const NOTIFICATION_HISTORY_DAYS: i64 = 7;
+const RESET_ACTION_TERMS: [&str; 3] = ["reset", "credit", "granted"];
+const RESET_EXPLICIT_PHRASES: [&str; 3] = ["we've reset", "we’ve reset", "we have reset"];
 const WATCH_TARGETS: [XWatchTarget; 3] = [
     XWatchTarget {
         handle: "thsottiaux",
@@ -207,6 +210,57 @@ fn sort_and_dedupe_posts(posts: &mut Vec<XPost>) {
     posts.retain(|post| ids.insert(post.id.clone()));
 }
 
+fn is_reset_announcement(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    let has_rate_limit_context =
+        normalized.contains("rate limit") || normalized.contains("rate-limit");
+    let has_reset_action = RESET_ACTION_TERMS
+        .iter()
+        .any(|term| normalized.contains(term));
+    let has_explicit_reset = RESET_EXPLICIT_PHRASES
+        .iter()
+        .any(|phrase| normalized.contains(phrase));
+    let has_codex_context = normalized.contains("codex");
+    let grants_reset_credit = normalized.contains("granted") && normalized.contains("reset credit");
+
+    (has_rate_limit_context && has_reset_action)
+        || (has_codex_context && has_explicit_reset)
+        || (has_codex_context && grants_reset_credit)
+}
+
+fn reset_announcement_snippet(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(200)
+        .collect()
+}
+
+fn reset_announcements(posts: &[XPost]) -> Vec<CodexResetAnnouncement> {
+    posts
+        .iter()
+        .filter(|post| {
+            WATCH_TARGETS
+                .iter()
+                .any(|target| target.handle.eq_ignore_ascii_case(&post.handle))
+                && is_reset_announcement(&post.text)
+        })
+        .map(|post| CodexResetAnnouncement {
+            post_id: post.id.clone(),
+            post_date: post.created_at,
+            handle: post.handle.clone(),
+            url: post.url.clone(),
+            snippet: reset_announcement_snippet(&post.text),
+        })
+        .collect()
+}
+
+fn persist_reset_announcements(posts: &[XPost], now: DateTime<Utc>) -> Result<(), String> {
+    let announcements = reset_announcements(posts);
+    CodexResetHistoryStore::from_settings()?.append_announcements(&announcements, now)
+}
+
 fn take_unread_notification(
     store: &mut PersistedXNotifications,
     id: &str,
@@ -300,6 +354,9 @@ async fn refresh_and_emit(app: &AppHandle, state: &XNotificationState) -> Refres
     let _refresh_guard = state.refresh_gate.lock().await;
     let (posts, errors) = codexbar::x_notifications::fetch_watchlist(&WATCH_TARGETS).await;
     let (succeeded, saw_429) = classify_refresh(&posts, &errors);
+    if let Err(error) = persist_reset_announcements(&posts, Utc::now()) {
+        tracing::warn!("Could not persist watched reset announcement: {error}");
+    }
     let mut store = state
         .store
         .lock()
@@ -437,6 +494,63 @@ mod tests {
             avatar_url: None,
             kind: XPostKind::Post,
         }
+    }
+
+    fn post_with_text(id: &str, handle: &str, created_at: &str, text: &str) -> XPost {
+        let mut item = post(id, handle, created_at);
+        item.text = text.to_string();
+        item
+    }
+
+    #[test]
+    fn reset_announcement_matcher_requires_reset_context() {
+        assert!(is_reset_announcement(
+            "Codex rate limits have been reset for everyone."
+        ));
+        assert!(is_reset_announcement(
+            "We granted Codex reset credits to affected users."
+        ));
+        assert!(is_reset_announcement(
+            "We've reset Codex access for the fleet."
+        ));
+        assert!(!is_reset_announcement("Reset your password to continue."));
+        assert!(!is_reset_announcement(
+            "Codex rate limits remain unchanged today."
+        ));
+        assert!(!is_reset_announcement(
+            "We granted research credits to universities."
+        ));
+    }
+
+    #[test]
+    fn reset_announcements_include_any_watched_handle_and_exact_status_url() {
+        let items = reset_announcements(&[
+            post_with_text(
+                "101",
+                "thsottiaux",
+                "2026-07-15T00:00:00Z",
+                "Codex rate limits have been reset.",
+            ),
+            post_with_text(
+                "102",
+                "OpenAI",
+                "2026-07-15T01:00:00Z",
+                "We granted Codex reset credits.",
+            ),
+            post_with_text(
+                "103",
+                "someoneelse",
+                "2026-07-15T02:00:00Z",
+                "Codex rate limits have been reset.",
+            ),
+        ]);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].handle, "thsottiaux");
+        assert_eq!(items[0].url, "https://x.com/thsottiaux/status/101");
+        assert_eq!(items[1].handle, "OpenAI");
+        assert_eq!(items[1].url, "https://x.com/OpenAI/status/102");
+        assert!(items.iter().all(|item| item.snippet.chars().count() <= 200));
     }
 
     #[test]

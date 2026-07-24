@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 mod auto_refresh;
+mod codex_reset_history;
 mod coding_activity;
 mod commands;
 mod events;
@@ -210,6 +211,7 @@ fn main() {
             commands::get_work_area_rect,
             commands::play_notification_sound,
             commands::open_external_url,
+            codex_reset_history::get_codex_reset_history,
             commands::reanchor_tray_panel,
             commands::quit_app,
             commands::open_provider_dashboard,

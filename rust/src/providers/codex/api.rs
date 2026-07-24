@@ -102,6 +102,18 @@ impl CodexApi {
         Ok((usage, cost))
     }
 
+    /// Fetch the complete set of reset-credit records currently returned by
+    /// the Codex endpoint. Callers may persist these non-secret records to
+    /// retain history after the endpoint stops returning older credits.
+    pub async fn fetch_reset_credit_entries(&self) -> Result<Vec<CodexResetCredit>, ProviderError> {
+        let creds = self.load_credentials()?;
+        let base_url = self.resolve_base_url();
+        Ok(self
+            .fetch_rate_limit_reset_credits(&creds, &base_url)
+            .await?
+            .credits)
+    }
+
     async fn fetch_rate_limit_reset_credits(
         &self,
         creds: &CodexCredentials,
@@ -691,12 +703,40 @@ struct SpendControlLimitSnapshot {
     resets_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct CodexResetCredit {
+    pub id: String,
+    #[serde(default)]
+    pub reset_type: String,
+    #[serde(default)]
+    pub is_supported_by_plan: bool,
+    #[serde(default)]
+    pub status: String,
+    pub granted_at: DateTime<Utc>,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub redeem_started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub redeemed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub profile_image_url: Option<String>,
+    #[serde(default)]
+    pub profile_user_id: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ResetCredits {
     #[serde(default)]
-    credits: Vec<serde_json::Value>,
+    credits: Vec<CodexResetCredit>,
     #[serde(default)]
     available_count: u32,
+    #[serde(default)]
+    total_earned_count: u32,
 }
 
 fn decode_reset_credits(data: &[u8]) -> Result<ResetCredits, ProviderError> {
@@ -913,10 +953,85 @@ mod tests {
 
     #[test]
     fn decodes_reset_credits() {
-        let credits = decode_reset_credits(br#"{"available_count":2,"credits":[{"id":"a"}]}"#)
-            .expect("reset credits");
-        assert_eq!(credits.available_count, 2);
-        assert_eq!(credits.credits.len(), 1);
+        let credits = decode_reset_credits(
+            br#"{
+                "available_count": 1,
+                "total_earned_count": 1,
+                "credits": [{
+                    "id": "RateLimitResetCredit_1",
+                    "reset_type": "codex_rate_limits",
+                    "is_supported_by_plan": true,
+                    "status": "available",
+                    "granted_at": "2026-07-13T17:49:11Z",
+                    "expires_at": "2026-08-12T17:49:11Z",
+                    "redeem_started_at": null,
+                    "redeemed_at": null,
+                    "profile_image_url": "https://example.test/codex-team.png",
+                    "profile_user_id": "Codex Team",
+                    "title": "Full reset",
+                    "description": "Reset all Codex rate limits.",
+                    "future_field": "ignored"
+                }]
+            }"#,
+        )
+        .expect("reset credits");
+        assert_eq!(credits.available_count, 1);
+        assert_eq!(credits.total_earned_count, 1);
+        assert_eq!(
+            credits.credits,
+            vec![CodexResetCredit {
+                id: "RateLimitResetCredit_1".to_string(),
+                reset_type: "codex_rate_limits".to_string(),
+                is_supported_by_plan: true,
+                status: "available".to_string(),
+                granted_at: DateTime::parse_from_rfc3339("2026-07-13T17:49:11Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                expires_at: Some(
+                    DateTime::parse_from_rfc3339("2026-08-12T17:49:11Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                redeem_started_at: None,
+                redeemed_at: None,
+                profile_image_url: Some("https://example.test/codex-team.png".to_string()),
+                profile_user_id: Some("Codex Team".to_string()),
+                title: "Full reset".to_string(),
+                description: "Reset all Codex rate limits.".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a live Codex OAuth session"]
+    async fn live_reset_credit_entries_include_a_current_banked_credit() {
+        let credits = CodexApi::new()
+            .fetch_reset_credit_entries()
+            .await
+            .expect("live reset-credit response");
+        println!("live reset credits: count={}", credits.len());
+        for credit in &credits {
+            println!(
+                "credit id={} status={} granted_at={} expires_at={} title={}",
+                credit.id,
+                credit.status,
+                credit.granted_at,
+                credit
+                    .expires_at
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_else(|| "none".to_string()),
+                credit.title
+            );
+        }
+        assert!(
+            credits.iter().any(|credit| {
+                credit.status.eq_ignore_ascii_case("available")
+                    && credit
+                        .expires_at
+                        .is_some_and(|expires_at| expires_at > Utc::now())
+            }),
+            "expected at least one available future reset credit"
+        );
     }
 
     #[test]
