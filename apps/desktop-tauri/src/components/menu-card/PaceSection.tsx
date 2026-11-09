@@ -1,16 +1,38 @@
+import { useEffect, useState } from "react";
 import { useLocale } from "../../hooks/useLocale";
-import { formatPaceEta } from "../../lib/usageDisplay";
+import { computeLivePace, formatPaceDuration } from "../../lib/paceRate";
 import { paceCategory } from "../../surfaces/tray/paceCategory";
-import { paceStageKey, type PaceEntry } from "./presentation";
+import {
+  describeLivePace,
+  paceStageKey,
+  type PaceEntry,
+} from "./presentation";
+
+/** Pace is recomputed locally every minute so it stays live between refreshes. */
+export const PACE_TICK_MS = 60_000;
 
 interface PaceSectionProps {
   entries: PaceEntry[];
 }
 
-const PaceWindow = ({ entry }: { entry: PaceEntry }) => {
+const useMinuteClock = (): Date => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), PACE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+};
+
+const PaceWindow = ({ entry, now }: { entry: PaceEntry; now: Date }) => {
   const { t } = useLocale();
-  const { pace } = entry;
+  const live = entry.snap
+    ? computeLivePace(entry.snap, now, entry.defaultWindowMinutes)
+    : null;
+  // Fall back to the backend snapshot when the window lacks usable timing.
+  const pace = live ?? entry.pace;
   const category = paceCategory(pace.stage);
+  const advice = live ? describeLivePace(live, t) : null;
 
   return (
     <div className="menu-card__pace-window" data-pace-window={entry.id}>
@@ -41,7 +63,7 @@ const PaceWindow = ({ entry }: { entry: PaceEntry }) => {
       {pace.etaSeconds != null && !pace.willLastToReset && (
         <div className="menu-card__pace-eta">
           ⚠{" "}
-          {t("DetailPaceRunsOutIn")} {formatPaceEta(pace.etaSeconds)}
+          {t("DetailPaceRunsOutIn")} {formatPaceDuration(pace.etaSeconds)}
         </div>
       )}
       {pace.willLastToReset && (
@@ -49,16 +71,40 @@ const PaceWindow = ({ entry }: { entry: PaceEntry }) => {
           ✓ {t("DetailPaceWillLastToReset")}
         </div>
       )}
+      {advice && (
+        <>
+          <dl className="menu-card__pace-rates">
+            <div className="menu-card__pace-rate" title={advice.rateHint}>
+              <dt>{t("DetailPaceYourRate")}</dt>
+              <dd data-pace-tone={advice.tone}>{advice.rateText}</dd>
+            </div>
+            <div className="menu-card__pace-rate" title={advice.safeRateHint}>
+              <dt>{t("DetailPaceSafeRate")}</dt>
+              <dd>≤ {advice.safeRateText}</dd>
+            </div>
+          </dl>
+          <p
+            className="menu-card__pace-advice"
+            data-pace-verdict={advice.verdict}
+          >
+            <strong data-pace-tone={advice.tone}>{advice.lead}</strong>{" "}
+            {advice.message}
+          </p>
+        </>
+      )}
     </div>
   );
 };
 
-const PaceSection = ({ entries }: PaceSectionProps) => (
-  <section className="menu-card__group menu-card__pace">
-    {entries.map((entry) => (
-      <PaceWindow entry={entry} key={entry.id} />
-    ))}
-  </section>
-);
+const PaceSection = ({ entries }: PaceSectionProps) => {
+  const now = useMinuteClock();
+  return (
+    <section className="menu-card__group menu-card__pace">
+      {entries.map((entry) => (
+        <PaceWindow entry={entry} key={entry.id} now={now} />
+      ))}
+    </section>
+  );
+};
 
 export default PaceSection;

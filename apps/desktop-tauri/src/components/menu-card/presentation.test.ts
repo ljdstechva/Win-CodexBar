@@ -3,7 +3,9 @@ import type { ProviderUsageSnapshot, RateWindowSnapshot } from "../../types/brid
 import {
   buildMetricEntries,
   buildPaceEntries,
+  describeLivePace,
   displayPlanName,
+  fillTemplate,
   formatCompactCount,
   formatReserveDescription,
   getMetricPaceView,
@@ -157,5 +159,123 @@ describe("usage-card presentation", () => {
   it("rounds a positive sub-minute subscription duration up to one minute", () => {
     const now = new Date("2026-07-20T10:00:00Z");
     expect(subscriptionCountdown("2026-07-20T10:00:01Z", now)).toBe("1m");
+  });
+
+  it("keeps the rate window and default duration on each pace entry", () => {
+    const snapshot = provider();
+    snapshot.primary = windowSnapshot({ windowMinutes: 5 * 60 });
+    snapshot.secondary = windowSnapshot({ windowMinutes: 7 * 24 * 60 });
+    const pace = {
+      stage: "on_track" as const,
+      deltaPercent: 0,
+      willLastToReset: true,
+      etaSeconds: null,
+      expectedUsedPercent: 20,
+      actualUsedPercent: 20,
+    };
+    snapshot.pace = pace;
+    snapshot.weeklyPace = pace;
+
+    const [primary, weekly] = buildPaceEntries(snapshot, t);
+    expect(primary.snap).toBe(snapshot.primary);
+    expect(primary.defaultWindowMinutes).toBe(300);
+    expect(weekly.snap).toBe(snapshot.secondary);
+    expect(weekly.defaultWindowMinutes).toBe(10_080);
+  });
+
+  it("fills placeholders in order", () => {
+    expect(fillTemplate("{} then {}", "a", "b")).toBe("a then b");
+    expect(fillTemplate("{}%/h", "0.60")).toBe("0.60%/h");
+  });
+});
+
+describe("describeLivePace", () => {
+  const english: Partial<Record<string, string>> = {
+    DetailPaceRatePerHour: "{}%/h",
+    DetailPaceRatePerMinute: "{}%/min",
+    DetailPaceYourRateHint: "Average per hour ({})",
+    DetailPaceSafeRateHint: "Fastest safe pace ({})",
+    DetailPaceLeadSlightlyFast: "A little too fast.",
+    DetailPaceMsgSlightlyFast:
+      "At this rate you'd run out about {} before the reset. Easing off to {} keeps you covered.",
+    DetailPaceLeadComfortable: "Well within budget.",
+    DetailPaceMsgComfortable:
+      "At this rate you'll still have about {} left when it resets. You can speed up to {} and still make it.",
+    DetailPaceLeadUnused: "Fresh window.",
+    DetailPaceMsgUnused: "All of it is yours for the next {}.",
+  };
+  const tEn = ((key: string) => english[key] ?? key) as Translate;
+  const base = {
+    stage: "on_track" as const,
+    deltaPercent: 0.7,
+    expectedUsedPercent: 58.3,
+    actualUsedPercent: 59,
+    remainingPercent: 41,
+    evenRatePerHour: 100 / 168,
+    willLastToReset: true,
+    etaSeconds: null,
+  };
+
+  it("tells the user how much earlier than the reset they would run out", () => {
+    const advice = describeLivePace(
+      {
+        ...base,
+        ratePerHour: 59 / 98,
+        safeRatePerHour: 41 / 70,
+        secondsUntilReset: 70 * 3600,
+        etaSeconds: 68 * 3600,
+        willLastToReset: false,
+        projectedLeftoverPercent: -1.1,
+        verdict: "slightly_fast",
+      },
+      tEn,
+    );
+
+    expect(advice.tone).toBe("racing");
+    expect(advice.rateText).toBe("0.60%/h");
+    expect(advice.safeRateText).toBe("0.59%/h");
+    expect(advice.rateHint).toBe("Average per hour (0.010%/min)");
+    expect(advice.lead).toBe("A little too fast.");
+    expect(advice.message).toBe(
+      "At this rate you'd run out about 2h before the reset. Easing off to 0.59%/h keeps you covered.",
+    );
+  });
+
+  it("reassures the user when the quota comfortably lasts", () => {
+    const advice = describeLivePace(
+      {
+        ...base,
+        ratePerHour: 0.24,
+        safeRatePerHour: 0.95,
+        secondsUntilReset: 84 * 3600,
+        projectedLeftoverPercent: 59.8,
+        verdict: "comfortable",
+      },
+      tEn,
+    );
+
+    expect(advice.tone).toBe("steady");
+    expect(advice.message).toBe(
+      "At this rate you'll still have about 60% left when it resets. You can speed up to 0.95%/h and still make it.",
+    );
+  });
+
+  it("describes an untouched window with the time until reset", () => {
+    const advice = describeLivePace(
+      {
+        ...base,
+        actualUsedPercent: 0,
+        ratePerHour: 0,
+        safeRatePerHour: 1,
+        secondsUntilReset: 100 * 3600,
+        projectedLeftoverPercent: 100,
+        verdict: "unused",
+      },
+      tEn,
+    );
+
+    expect(advice.tone).toBe("idle");
+    expect(advice.rateText).toBe("0%/h");
+    expect(advice.message).toBe("All of it is yours for the next 4d 4h.");
   });
 });
