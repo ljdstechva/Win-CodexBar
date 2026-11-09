@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -117,6 +117,8 @@ describe("MenuCard", () => {
         DetailPaceRunsOutIn: "Runs out in",
         DetailPaceTitle: "Pace",
         DetailPaceWillLastToReset: "Will last to reset",
+        DetailPaceRatePerHour: "{}%/h",
+        DetailPaceRatePerMinute: "{}%/min",
         PanelActual: "Actual",
         PanelEstimatedFromLocalLogs: "Estimated from local logs",
         PanelExpected: "Expected",
@@ -519,7 +521,7 @@ describe("MenuCard", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
-        "⚠ Runs out in 2h",
+        "⚠ Runs out in 1h 30m",
       );
     });
   });
@@ -639,8 +641,60 @@ describe("MenuCard", () => {
 
     await screen.findByText("5h Pace");
     expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
-      "Runs out in 4h",
+      "Runs out in 3h 30m",
     );
+  });
+
+  it("shows live hourly rates and a weekly pace sentence that tick every minute", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-09T10:00:00Z"));
+      const snapshot = provider(null, 0);
+      snapshot.primary = rateWindow(0, { windowMinutes: 5 * 60 });
+      snapshot.secondary = rateWindow(59, {
+        windowMinutes: 7 * 24 * 60,
+        resetsAt: "2026-11-12T08:00:00Z",
+      });
+      snapshot.secondaryLabel = "Weekly";
+      snapshot.weeklyPace = {
+        stage: "on_track",
+        deltaPercent: 0.7,
+        willLastToReset: false,
+        etaSeconds: 68 * 3600,
+        expectedUsedPercent: 58.3,
+        actualUsedPercent: 59,
+      };
+
+      const { container } = renderCard(snapshot);
+      await screen.findByText("Weekly Pace");
+
+      const weekly = container.querySelector('[data-pace-window="weekly"]');
+      const rates = weekly?.querySelector(".menu-card__pace-rates");
+      expect(rates).toHaveTextContent("DetailPaceYourRate0.60%/h");
+      expect(rates).toHaveTextContent("DetailPaceSafeRate≤ 0.59%/h");
+      const advice = weekly?.querySelector(".menu-card__pace-advice");
+      expect(advice).toHaveAttribute("data-pace-verdict", "slightly_fast");
+      expect(advice).toHaveTextContent(
+        "DetailPaceLeadSlightlyFast DetailPaceMsgSlightlyFast",
+      );
+      expect(weekly?.querySelector(".menu-card__pace-eta")).toHaveTextContent(
+        "Runs out in 2d 20h",
+      );
+      const expectedFill = () =>
+        weekly?.querySelector<HTMLElement>(".menu-card__pace-fill--expected")
+          ?.style.width;
+      expect(expectedFill()).toBe("58.3%");
+
+      // Two idle hours later the expected bar and the verdict update
+      // without a provider refresh.
+      act(() => {
+        vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+      });
+      expect(expectedFill()).toBe("59.5%");
+      expect(advice).toHaveAttribute("data-pace-verdict", "on_time");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows on-pace budgets and expands projection details", async () => {

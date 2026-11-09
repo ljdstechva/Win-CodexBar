@@ -5,6 +5,12 @@ import type {
 } from "../../types/bridge";
 import type { LocaleKey } from "../../i18n/keys";
 import { getPaceBudget } from "../../lib/paceBudget";
+import {
+  formatPaceDuration,
+  formatRateNumber,
+  type LivePace,
+  type PaceVerdict,
+} from "../../lib/paceRate";
 export { displayPlanName } from "../../lib/providerPlan";
 
 export type Translate = (key: LocaleKey) => string;
@@ -19,6 +25,24 @@ export interface PaceEntry {
   id: "primary" | "weekly";
   label: string;
   pace: PaceSnapshot;
+  /** The rate window the pace was computed from, for live per-minute updates. */
+  snap: RateWindowSnapshot | null;
+  /** Window length assumed when the snapshot omits its duration. */
+  defaultWindowMinutes: number;
+}
+
+/** Color tone for the pace coaching line; reuses the pace badge palette. */
+export type PaceTone = "idle" | "steady" | "racing" | "burning";
+
+export interface PaceAdvice {
+  verdict: PaceVerdict;
+  tone: PaceTone;
+  lead: string;
+  message: string;
+  rateText: string;
+  safeRateText: string;
+  rateHint: string;
+  safeRateHint: string;
 }
 
 export type UsageLevel = "normal" | "high" | "critical" | "exhausted";
@@ -195,6 +219,8 @@ export const buildPaceEntries = (
           ? t("PanelFiveHours")
           : provider.primaryLabel ?? t("DetailWindowPrimary"),
       pace: provider.pace,
+      snap: provider.primary,
+      defaultWindowMinutes: 5 * 60,
     });
   }
 
@@ -205,8 +231,96 @@ export const buildPaceEntries = (
         localizeWindowLabel(provider.secondaryLabel, t) ||
         t("ProviderWeeklyLabel"),
       pace: provider.weeklyPace,
+      snap: provider.secondary,
+      defaultWindowMinutes: WEEKLY_WINDOW_MINUTES,
     });
   }
 
   return entries;
+};
+
+/** Replace `{}` placeholders in order, matching the Rust `format_template`. */
+export const fillTemplate = (template: string, ...args: string[]): string =>
+  args.reduce((text, arg) => text.replace("{}", arg), template);
+
+const PACE_TONES: Record<PaceVerdict, PaceTone> = {
+  unused: "idle",
+  comfortable: "steady",
+  on_time: "steady",
+  slightly_fast: "racing",
+  too_fast: "burning",
+  exhausted: "burning",
+};
+
+const formatPercentAmount = (percent: number): string =>
+  `${Math.max(1, Math.round(percent))}%`;
+
+/**
+ * Turn a live pace into the per-hour rate pair and a plain-language
+ * sentence telling the user whether the quota will last until reset.
+ */
+export const describeLivePace = (live: LivePace, t: Translate): PaceAdvice => {
+  const perHour = (rate: number) =>
+    fillTemplate(t("DetailPaceRatePerHour"), formatRateNumber(rate));
+  const perMinute = (rate: number) =>
+    fillTemplate(t("DetailPaceRatePerMinute"), formatRateNumber(rate / 60));
+  const safeRate = perHour(live.safeRatePerHour);
+  const untilReset = formatPaceDuration(live.secondsUntilReset);
+  const early =
+    live.etaSeconds != null
+      ? formatPaceDuration(live.secondsUntilReset - live.etaSeconds)
+      : untilReset;
+
+  let lead: string;
+  let message: string;
+  switch (live.verdict) {
+    case "unused":
+      lead = t("DetailPaceLeadUnused");
+      message = fillTemplate(t("DetailPaceMsgUnused"), untilReset);
+      break;
+    case "comfortable":
+      lead = t("DetailPaceLeadComfortable");
+      message = fillTemplate(
+        t("DetailPaceMsgComfortable"),
+        formatPercentAmount(live.projectedLeftoverPercent),
+        safeRate,
+      );
+      break;
+    case "on_time":
+      lead = t("DetailPaceLeadOnTime");
+      message = fillTemplate(
+        t("DetailPaceMsgOnTime"),
+        formatPercentAmount(live.projectedLeftoverPercent),
+      );
+      break;
+    case "slightly_fast":
+      lead = t("DetailPaceLeadSlightlyFast");
+      message = fillTemplate(t("DetailPaceMsgSlightlyFast"), early, safeRate);
+      break;
+    case "too_fast":
+      lead = t("DetailPaceLeadTooFast");
+      message = fillTemplate(t("DetailPaceMsgTooFast"), early, safeRate);
+      break;
+    case "exhausted":
+      lead = t("DetailPaceLeadExhausted");
+      message = fillTemplate(t("DetailPaceMsgExhausted"), untilReset);
+      break;
+  }
+
+  return {
+    verdict: live.verdict,
+    tone: PACE_TONES[live.verdict],
+    lead,
+    message,
+    rateText: perHour(live.ratePerHour),
+    safeRateText: safeRate,
+    rateHint: fillTemplate(
+      t("DetailPaceYourRateHint"),
+      perMinute(live.ratePerHour),
+    ),
+    safeRateHint: fillTemplate(
+      t("DetailPaceSafeRateHint"),
+      perMinute(live.safeRatePerHour),
+    ),
+  };
 };

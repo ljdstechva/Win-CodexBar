@@ -4717,6 +4717,54 @@ html:has(.menu-surface--tray) {
   color: var(--pace-steady-fg);
 }
 
+.menu-card__pace-rates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 0;
+}
+
+.menu-card__pace-rate {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.menu-card__pace-rate dt {
+  font-size: var(--font-caption, 11px);
+  color: var(--text-secondary);
+}
+
+.menu-card__pace-rate dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.menu-card__pace-advice {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-card__pace-advice strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.menu-card__pace-rate dd[data-pace-tone="steady"],
+.menu-card__pace-advice strong[data-pace-tone="steady"] { color: var(--pace-steady-fg); }
+.menu-card__pace-rate dd[data-pace-tone="racing"],
+.menu-card__pace-advice strong[data-pace-tone="racing"] { color: var(--pace-racing-fg); }
+.menu-card__pace-rate dd[data-pace-tone="burning"],
+.menu-card__pace-advice strong[data-pace-tone="burning"] { color: var(--pace-burning-fg); }
+
 .menu-card__charts {
   gap: 10px;
 }
